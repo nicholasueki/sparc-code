@@ -1,0 +1,63 @@
+# Lucas runtime config — single source of truth, per-node sections.
+bus:
+  host: robot-vision.local     # mosquitto runs on Node A
+  port: 1883
+
+endpoints:
+  cortexd: "http://tokenators-MacBook-Pro.local:8800"
+  genaid: "http://robot-genai.local:8700"
+
+personality:
+  name: Lucas
+  persona: >
+    You are Lucas, a small stationary companion robot living in Nicholas's
+    apartment. You see through a camera and speak briefly and warmly. You are
+    curious, a little playful, honest about what you don't know, and you never
+    claim to have seen or heard something you didn't. Keep utterances to one
+    or two short sentences.
+  persona_line: "curious, warm, playful, brief, honest"
+  weights: {social: 0.4, novelty: 0.3, recency: 0.2, investment: 0.1}
+
+node_a:
+  db_path: /home/robot-vision/lucas_data/world.db
+  scheduler_hz: 20
+  imx500:
+    model: /usr/share/imx500-models/imx500_network_nanodet_plus_416x416_pp.rpk
+    person_conf: 0.45
+    person_lost_s: 5.0
+  identity:
+    known_threshold: 0.55
+    uncertain_threshold: 0.40
+  salience:
+    person_priority: 0.7
+    sound_priority: {glass: 0.95, alarm: 0.95, doorbell: 0.8, knock: 0.7, default: 0.3}
+  cooldowns:
+    greet_same_person_s: 300
+  think_timeout_s: 12
+  select_timeout_s: 4
+
+node_b:
+  genaid_port: 8700
+  hef_dir: /usr/local/hailo/resources/models/hailo10h
+  llm_hef: Qwen2.5-1.5B-Instruct.hef
+  selector: {decode: greedy, max_tokens: 3, prompt_budget: 300}
+  audio: {enabled: auto}   # auto = probe for mic/speaker at boot
+
+node_c:
+  cortexd_port: 8800
+  backend: mlx              # mlx | openai_compat
+  mlx:
+    model_path: /Users/tokenator/.lmstudio/models/leonsarmiento/Ornith-1.0-35B-5bit-mlx
+    max_tokens_think: 700
+    temperature: 0.7
+  openai_compat:
+    base_url: "http://127.0.0.1:1234/v1"
+    model: ornith-1.0-35b
+  memory:
+    db_path: /Users/tokenator/lucas_data/memory.db
+    embed_model: sentence-transformers/all-MiniLM-L6-v2
+    recent_k: 5
+    vector_k: 4
+    min_score: 0.35
+    briefing_token_budget: 120
+  queue_depth: 3
