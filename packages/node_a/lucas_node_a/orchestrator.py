@@ -78,6 +78,20 @@ class Orchestrator:
     def on_transcript(self, tr: Transcript) -> None:
         self.world.conversation.append({"role": "user", "text": tr.text, "ts": tr.ts})
         self.world.add_event("user_said", f'someone said: "{tr.text}"', [], 0.8)
+        # Deterministic memory rule: explicit "remember ..." is committed by code,
+        # never left to the model's option choice (design §1.4 / §2.4).
+        import re as _re
+
+        m = _re.search(r"\bremember\b[,:]?\s*(?:that\s+)?(.+)", tr.text, _re.IGNORECASE)
+        if m and len(m.group(1)) > 3:
+            stmt = m.group(1).strip().rstrip(".!")
+            fid = self.world.commit_fact(stmt, source="user_told", confidence=0.9)
+            try:
+                self.cortex.post("/memory/upsert",
+                                 json={"fact_id": fid, "statement": stmt}, timeout=5)
+            except Exception:
+                log.warning("memory mirror offline for fact %s", fid)
+            log.info("DETERMINISTIC REMEMBER: %s", stmt)
         d = Deliberation(
             event_type="person_speaks",
             trigger_desc=f'they said: "{tr.text}"',
@@ -223,6 +237,10 @@ class Orchestrator:
             except Exception:
                 log.warning("memory mirror offline; fact %s queued locally only", fid)
             log.info("LUCAS REMEMBERS: %s", stmt)
+            # a remember with no reply feels like being ignored — brief deterministic ack
+            ack = "Got it — I'll remember that."
+            self.bus.publish("lucas/tts/say", SpeakRequest(text=ack))
+            self.world.conversation.append({"role": "lucas", "text": ack, "ts": time.time()})
         elif action.kind == "set_reminder":
             self.world.add_event("reminder_set",
                                  f"reminder: {action.args.get('text','')}", d.entity_ids, 0.5)
