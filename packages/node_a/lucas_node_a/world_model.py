@@ -157,8 +157,23 @@ class WorldModel:
 
     # ------------------------------------------------------------- facts
 
-    def commit_fact(self, statement: str, source: str, confidence: float = 0.7) -> str:
-        """Reconciliation-lite: exact-ish dedupe now; embedding dedupe via Node C later."""
+    def commit_fact(self, statement: str, source: str, confidence: float = 0.7,
+                    similar: tuple[str, float] | None = None,
+                    dup_threshold: float = 0.92) -> str:
+        """Reconciliation: exact dedupe here; semantic dedupe via `similar` =
+        (existing_fact_id, cosine_score) supplied by the caller's vector lookup."""
+        if similar and similar[1] >= dup_threshold:
+            fid = similar[0]
+            row = self.db.execute(
+                "SELECT confidence FROM facts WHERE id=? AND invalidated IS NULL", (fid,)
+            ).fetchone()
+            if row:
+                self.db.execute(
+                    "UPDATE facts SET confidence=? WHERE id=?",
+                    (min(0.99, row[0] + (1 - row[0]) * 0.3), fid),
+                )
+                self.db.commit()
+                return fid
         row = self.db.execute(
             "SELECT id, confidence FROM facts WHERE statement=? AND invalidated IS NULL",
             (statement,),

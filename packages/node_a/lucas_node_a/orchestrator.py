@@ -85,13 +85,29 @@ class Orchestrator:
         m = _re.search(r"\bremember\b[,:]?\s*(?:that\s+)?(.+)", tr.text, _re.IGNORECASE)
         if m and len(m.group(1)) > 3:
             stmt = m.group(1).strip().rstrip(".!")
-            fid = self.world.commit_fact(stmt, source="user_told", confidence=0.9)
+            self._commit_fact(stmt, source="user_told", confidence=0.9)
+            log.info("DETERMINISTIC REMEMBER: %s", stmt)
+
+    def _commit_fact(self, stmt: str, source: str, confidence: float = 0.7) -> str:
+        """Commit with semantic dedupe: near-duplicates reinforce instead of pile up."""
+        similar = None
+        try:
+            r = self.cortex.post("/memory/retrieve",
+                                 json={"situation": stmt, "k": 1}, timeout=4)
+            hits = r.json() if r.status_code == 200 else []
+            if hits:
+                similar = (hits[0]["fact_id"], hits[0]["score"])
+        except Exception:
+            pass
+        fid = self.world.commit_fact(stmt, source=source, confidence=confidence,
+                                     similar=similar)
+        if not (similar and similar[0] == fid):  # new fact -> mirror it
             try:
                 self.cortex.post("/memory/upsert",
                                  json={"fact_id": fid, "statement": stmt}, timeout=5)
             except Exception:
                 log.warning("memory mirror offline for fact %s", fid)
-            log.info("DETERMINISTIC REMEMBER: %s", stmt)
+        return fid
         d = Deliberation(
             event_type="person_speaks",
             trigger_desc=f'they said: "{tr.text}"',
@@ -243,12 +259,7 @@ class Orchestrator:
             log.info("LUCAS SAYS: %s", text)
         elif action.kind == "remember":
             stmt = action.args.get("statement", "")
-            fid = self.world.commit_fact(stmt, source="observed")
-            try:
-                self.cortex.post("/memory/upsert",
-                                 json={"fact_id": fid, "statement": stmt}, timeout=5)
-            except Exception:
-                log.warning("memory mirror offline; fact %s queued locally only", fid)
+            self._commit_fact(stmt, source="observed")
             log.info("LUCAS REMEMBERS: %s", stmt)
             # a remember with no reply feels like being ignored — brief deterministic ack
             ack = "Got it — I'll remember that."

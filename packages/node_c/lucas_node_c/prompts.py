@@ -16,24 +16,45 @@ log = logging.getLogger("lucas.prompts")
 
 THINK_TASK = """\
 TASK: You are deciding Lucas's next move. Propose {max_options} DISTINCT candidate \
-actions from this exact set: say, ask_user, wait, remember, set_reminder. Options must \
+actions from this exact set: {action_set}. Options must \
 differ in kind or intent, not wording. Then choose the best one for Lucas's personality \
 and a backup. Reply with ONLY this JSON, no other text:
 {{"options":[{{"idx":0,"action":"say","args":{{"text":"..."}},"tone":"warm","risk":"low","novelty":0.3}}],
 "choice":0,"backup":1,"why":"one short sentence"}}
 Rules: args for say/ask_user = {{"text": ...}} (1-2 short sentences, in character); \
-remember = {{"statement": ...}}; set_reminder = {{"text": ..., "in_minutes": N}}; wait = {{}}."""
+remember = {{"statement": ...}}; set_reminder = {{"text": ..., "in_minutes": N}}; wait = {{}}.{motion_rules}"""
+
+MOTION_RULES = """ \
+Motion args: look_at = {"target": "<person name|sound|door|window>"}; \
+approach = {"target": "<person name>", "standoff_m": 0.5-2.0}; \
+back_up = {"distance_m": 0.1-1.0}; stop_moving = {}. \
+Move only when it clearly helps; never move toward someone without a reason they'd welcome."""
+
+BASE_ACTIONS = "say, ask_user, wait, remember, set_reminder"
+MOTION_ACTIONS = BASE_ACTIONS + ", look_at, approach, back_up, stop_moving"
 
 
 def build_think_user(req: ThinkRequest) -> str:
     parts = [f"SCENE: {req.scene}"]
     if req.memory:
-        parts.append(f"MEMORY: {req.memory}")
+        parts.append(
+            "MEMORY (the COMPLETE list of what Lucas knows from the past — if an "
+            f"answer is not here or in CONVERSATION, Lucas does NOT know it and says so): {req.memory}"
+        )
+    else:
+        parts.append(
+            "MEMORY: (empty — Lucas has no stored knowledge; he must not claim to "
+            "remember anything)"
+        )
     if req.conversation:
         turns = "\n".join(f"{t['role']}: {t['text']}" for t in req.conversation[-12:])
         parts.append(f"CONVERSATION:\n{turns}")
     parts.append(f"EVENT: {req.event}")
-    parts.append(THINK_TASK.format(max_options=req.max_options))
+    parts.append(THINK_TASK.format(
+        max_options=req.max_options,
+        action_set=MOTION_ACTIONS if req.motion else BASE_ACTIONS,
+        motion_rules=MOTION_RULES if req.motion else "",
+    ))
     return "\n\n".join(parts)
 
 

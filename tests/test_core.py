@@ -46,8 +46,9 @@ def test_build_think_user_sections():
     req = ThinkRequest(deliberation_id="d1", scene="A room.", memory="Nicholas likes tea.",
                        conversation=[{"role": "user", "text": "hello"}], event="someone came in")
     text = prompts.build_think_user(req)
-    for section in ("SCENE:", "MEMORY:", "CONVERSATION:", "EVENT:", "TASK:"):
+    for section in ("SCENE:", "MEMORY", "CONVERSATION:", "EVENT:", "TASK:"):
         assert section in text
+    assert "COMPLETE list" in text  # closed-world memory declaration (anti-fabrication)
 
 
 def test_tracker_new_and_lost():

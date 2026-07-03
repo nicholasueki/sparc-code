@@ -72,7 +72,12 @@ class SpeakRequest(Msg):
 
 # ----------------------------------------------------------------- cognition
 
-ActionKind = Literal["say", "ask_user", "wait", "remember", "set_reminder"]
+ActionKind = Literal[
+    "say", "ask_user", "wait", "remember", "set_reminder",
+    # motion intents (schema ships pre-hardware; execution gated by motion.enabled)
+    "look_at", "approach", "back_up", "stop_moving",
+]
+MOTION_KINDS = {"look_at", "approach", "back_up", "stop_moving"}
 
 
 class OptionMeta(BaseModel):
@@ -138,6 +143,7 @@ class ThinkRequest(BaseModel):
     event: str  # one-line trigger
     image_b64: Optional[str] = None
     max_options: int = 5
+    motion: bool = False  # offer motion intents in the action menu
     # experiment overrides (eval harness only; None = use config defaults)
     persona_override: Optional[str] = None
     temperature_override: Optional[float] = None

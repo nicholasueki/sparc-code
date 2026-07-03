@@ -85,7 +85,8 @@ def think(req: ThinkRequest) -> ThinkResponse:
     _queue_guard()
     t0 = time.time()
     user = prompts.build_think_user(req)
-    system = req.persona_override or PERSONA
+    motion_persona = config.get("personality.persona_motion", PERSONA)
+    system = req.persona_override or (motion_persona if req.motion else PERSONA)
     base_temp = (req.temperature_override if req.temperature_override is not None
                  else float(CFG["mlx"].get("temperature", 0.7)))
     parsed = None
