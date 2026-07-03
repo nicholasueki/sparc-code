@@ -52,11 +52,40 @@ class CentroidTracker:
         return current, new_ids, lost
 
 
+def _parse_detections(outputs, imx500, conf_t: float
+                      ) -> tuple[list[tuple[float, float, float, float]], list[float]]:
+    """Person boxes+confs from IMX500 tensors. Handles both output layouts:
+    - `_pp` rpk (postprocess on-sensor): outputs = [boxes, scores, classes]
+    - raw rpk: host-side nanodet postprocess
+    Boxes normalized to [0,1] xyxy regardless of source format.
+    """
+    boxes: list[tuple[float, float, float, float]] = []
+    confs: list[float] = []
+    if len(outputs) >= 3:  # on-sensor postprocessed
+        b, scores, classes = outputs[0][0], outputs[1][0], outputs[2][0]
+    else:  # raw output tensor -> host postprocess
+        from picamera2.devices.imx500 import postprocess_nanodet_detection
+
+        b, scores, classes = postprocess_nanodet_detection(
+            outputs=outputs[0], conf=conf_t, iou_thres=0.6, max_out_dets=8
+        )[0]
+    in_w, in_h = imx500.get_input_size()
+    for box, score, cls in zip(b, scores, classes):
+        if int(cls) != PERSON_CLASS or float(score) < conf_t:
+            continue
+        v = [float(x) for x in box]
+        if max(v) > 1.5:  # pixel coords -> normalize
+            v = [v[0] / in_h, v[1] / in_w, v[2] / in_h, v[3] / in_w]
+        y0, x0, y1, x1 = v  # sensor emits yxyx
+        boxes.append((x0, y0, x1, y1))
+        confs.append(float(score))
+    return boxes, confs
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     from picamera2 import Picamera2
     from picamera2.devices import IMX500
-    from picamera2.devices.imx500 import postprocess_nanodet_detection
 
     cfg = config.get("node_a.imx500", {})
     imx500 = IMX500(cfg["model"])
@@ -77,20 +106,11 @@ def main() -> None:
         outputs = imx500.get_outputs(metadata, add_batch=True)
         if outputs is None:
             continue
-        boxes: list[tuple[float, float, float, float]] = []
-        confs: list[float] = []
         try:
-            # postprocessed rpk: outputs = boxes/scores/classes tensors
-            b, scores, classes = postprocess_nanodet_detection(
-                outputs=outputs[0], conf=conf_t, iou_thres=0.6, max_out_dets=8
-            )[0]
-            for box, score, cls in zip(b, scores, classes):
-                if int(cls) == PERSON_CLASS and score >= conf_t:
-                    x0, y0, x1, y1 = box
-                    boxes.append((float(x0), float(y0), float(x1), float(y1)))
-                    confs.append(float(score))
+            boxes, confs = _parse_detections(outputs, imx500, conf_t)
         except Exception:
             log.exception("tensor parse failed")
+            time.sleep(1)  # don't spam the log at 30 fps
             continue
 
         current, new_ids, lost_ids = tracker.update(boxes)
