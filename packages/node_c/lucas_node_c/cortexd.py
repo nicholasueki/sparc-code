@@ -85,15 +85,18 @@ def think(req: ThinkRequest) -> ThinkResponse:
     _queue_guard()
     t0 = time.time()
     user = prompts.build_think_user(req)
+    system = req.persona_override or PERSONA
+    base_temp = (req.temperature_override if req.temperature_override is not None
+                 else float(CFG["mlx"].get("temperature", 0.7)))
     parsed = None
     raw = ""
     attempts = 0
     for attempt in range(2):  # L1: one retry
         attempts = attempt + 1
         raw = _generate(
-            PERSONA, user, req.image_b64,
+            system, user, req.image_b64,
             max_tokens=int(CFG["mlx"].get("max_tokens_think", 700)),
-            temperature=float(CFG["mlx"].get("temperature", 0.7)) if attempt == 0 else 0.2,
+            temperature=base_temp if attempt == 0 else 0.2,
         )
         parsed = prompts.parse_think(raw, req.max_options)
         if parsed:
@@ -122,7 +125,9 @@ def think(req: ThinkRequest) -> ThinkResponse:
     think_match = _re.search(r"<think>(.*?)</think>", raw, _re.DOTALL)
     return ThinkResponse(
         options=options, choice=choice, backup=backup, why=why, action=action,
-        timing_ms={"generate": gen_ms, "attempts": attempts},
+        timing_ms={"generate": gen_ms, "attempts": attempts,
+                   "prompt_chars": len(system) + len(user),
+                   "raw_chars": len(raw)},
         fallback_level=0 if attempts == 1 else 1,
         thinking=(think_match.group(1).strip() if think_match else ""),
     )

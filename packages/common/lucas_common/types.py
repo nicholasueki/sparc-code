@@ -138,6 +138,9 @@ class ThinkRequest(BaseModel):
     event: str  # one-line trigger
     image_b64: Optional[str] = None
     max_options: int = 5
+    # experiment overrides (eval harness only; None = use config defaults)
+    persona_override: Optional[str] = None
+    temperature_override: Optional[float] = None
 
 
 class ThinkResponse(BaseModel):

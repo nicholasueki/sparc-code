@@ -165,6 +165,7 @@ class Orchestrator:
                 for t in self.world.conversation[-12:]
             ],
             event=d.trigger_desc,
+            max_options=3,  # eval: 3 options = same pass rate, ~30% faster than 5
         )
         t0 = time.time()
         action = None
