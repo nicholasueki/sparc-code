@@ -1,7 +1,7 @@
 # Lucas runtime config — single source of truth, per-node sections.
 bus:
-  host: robot-vision.local     # mosquitto runs on Node A
-  port: 1883
+  host: 10.1.215.55            # mosquitto on Node A — IP, not .local: macOS mDNS
+  port: 1883                   # resolution proved flaky from Node C (Errno 65)
 
 endpoints:
   cortexd: "http://tokenators-MacBook-Pro.local:8800"

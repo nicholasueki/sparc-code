@@ -178,6 +178,18 @@ class Orchestrator:
                 "choice": resp.choice, "why": resp.why,
                 "fallback_level": resp.fallback_level,
                 "n_options": len(resp.options.options)})
+            # publish the full thought to the live watcher via the LOCAL broker
+            # (cortexd's own cross-node MQTT publish is unreliable under MLX; the
+            # orchestrator owns the broker box, so this hop never flaps)
+            self.bus.publish_json("lucas/debug/thought", {
+                "kind": "think", "deliberation_id": d.id, "event": d.trigger_desc,
+                "scene": d.snapshot, "memory": memory_brief, "thinking": resp.thinking,
+                "options": [{"idx": o.idx, "action": o.action, "args": o.args, "tone": o.tone}
+                            for o in resp.options.options],
+                "choice": resp.choice, "backup": resp.backup, "why": resp.why,
+                "gen_ms": resp.timing_ms.get("generate"),
+                "attempts": resp.timing_ms.get("attempts"),
+            })
         except Exception as e:
             # L2: cortex unreachable -> deterministic reflex partial
             log.warning("cortexd unavailable (%s); using reflex partial", e)

@@ -74,6 +74,20 @@ class Bus:
             topic, msg.model_dump_json(), qos=1, retain=topic in RETAINED
         )
 
+    def publish_json(self, topic: str, payload: dict) -> None:
+        """Untyped escape hatch for debug/telemetry topics only.
+
+        Oversized string fields are trimmed so the JSON stays valid.
+        """
+        line = json.dumps(payload)
+        if len(line) > 60000:
+            payload = {
+                k: (v[:8000] + "…[trimmed]") if isinstance(v, str) and len(v) > 8000 else v
+                for k, v in payload.items()
+            }
+            line = json.dumps(payload)[:60000]
+        self._client.publish(topic, line, qos=0, retain=False)
+
     def subscribe(self, topic: str, model: Type[T], handler: Callable[[T], None]) -> None:
         self._handlers.setdefault(topic, []).append((model, handler))
         if self._connected.is_set():

@@ -48,6 +48,7 @@ _inflight = 0
 
 backend = None
 memory: SemanticMemory | None = None
+_debug_mqtt = None
 
 
 @app.on_event("startup")
@@ -116,10 +117,14 @@ def think(req: ThinkRequest) -> ThinkResponse:
 
     options, choice, backup, why = parsed
     action = prompts.option_to_action(options.options[choice], why)
+    import re as _re
+
+    think_match = _re.search(r"<think>(.*?)</think>", raw, _re.DOTALL)
     return ThinkResponse(
         options=options, choice=choice, backup=backup, why=why, action=action,
         timing_ms={"generate": gen_ms, "attempts": attempts},
         fallback_level=0 if attempts == 1 else 1,
+        thinking=(think_match.group(1).strip() if think_match else ""),
     )
 
 

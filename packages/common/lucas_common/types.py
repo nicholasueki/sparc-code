@@ -148,6 +148,7 @@ class ThinkResponse(BaseModel):
     action: Action  # resolved chosen action, validated server-side
     timing_ms: dict = Field(default_factory=dict)
     fallback_level: int = 0
+    thinking: str = ""  # model's <think> block, for the live watcher
 
 
 class VlmQuery(BaseModel):
