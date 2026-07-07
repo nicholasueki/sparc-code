@@ -75,3 +75,28 @@ def test_option_to_action():
     opt = OptionMeta(idx=2, action="say", args={"text": "hi"})
     act = prompts.option_to_action(opt, "why", 0)
     assert act.kind == "say" and act.option_idx == 2
+
+
+def test_on_transcript_queues_deliberation(tmp_path, monkeypatch):
+    """Regression: a transcript must BOTH ingest the event and queue a deliberation
+    (a bad edit once stranded the submit() as dead code — nothing ever thought)."""
+    cfg = tmp_path / "lucas.yaml"
+    cfg.write_text(
+        "bus: {host: 127.0.0.1, port: 1883}\n"
+        "endpoints: {cortexd: 'http://127.0.0.1:1'}\n"  # unreachable -> fast fail paths
+        f"node_a: {{db_path: {tmp_path}/world.db, think_timeout_s: 1}}\n"
+    )
+    monkeypatch.setenv("LUCAS_CONFIG", str(cfg))
+    from lucas_common import config
+    config.load.cache_clear()
+    sys.path.insert(0, str(ROOT / "packages" / "node_a"))
+    from lucas_node_a.orchestrator import Orchestrator
+    from lucas_common.types import Transcript
+
+    o = Orchestrator()
+    o.on_transcript(Transcript(text="remember that the towels live in the hall closet"))
+    assert len(o._queue) == 1, "transcript must queue a person_speaks deliberation"
+    assert o._queue[0][2].event_type == "person_speaks"
+    facts = o.world.facts_for_prompt(5)
+    assert any("towels" in f for f in facts), "deterministic remember must commit"
+    config.load.cache_clear()

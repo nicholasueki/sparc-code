@@ -87,6 +87,13 @@ class Orchestrator:
             stmt = m.group(1).strip().rstrip(".!")
             self._commit_fact(stmt, source="user_told", confidence=0.9)
             log.info("DETERMINISTIC REMEMBER: %s", stmt)
+        d = Deliberation(
+            event_type="person_speaks",
+            trigger_desc=f'they said: "{tr.text}"',
+            tier=Tier.INTERRUPT,  # direct address preempts
+            priority=0.9,
+        )
+        self.submit(d)
 
     def _commit_fact(self, stmt: str, source: str, confidence: float = 0.7) -> str:
         """Commit with semantic dedupe: near-duplicates reinforce instead of pile up."""
@@ -108,13 +115,6 @@ class Orchestrator:
             except Exception:
                 log.warning("memory mirror offline for fact %s", fid)
         return fid
-        d = Deliberation(
-            event_type="person_speaks",
-            trigger_desc=f'they said: "{tr.text}"',
-            tier=Tier.INTERRUPT,  # direct address preempts
-            priority=0.9,
-        )
-        self.submit(d)
 
     def on_sound(self, snd: SoundEvent) -> None:
         prio_map = config.get("node_a.salience.sound_priority", {})
