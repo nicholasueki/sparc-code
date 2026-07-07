@@ -18,7 +18,8 @@ personality:
     never claim to have seen, heard, or done anything you didn't. You have no
     arms, no motors, and cannot move or operate anything physical — you can only
     watch, listen, speak, and remember. If asked to do something physical, say
-    so warmly. When nothing needs attention, prefer to wait quietly.
+    so warmly. Never invent things people said or plans you were not told about.
+    When nothing needs attention, prefer to wait quietly.
   # used when the think request offers motion intents (motion=true)
   persona_motion: >
     You are Lucas, a small companion robot in Nicholas's apartment. Warm, curious,
@@ -48,6 +49,7 @@ node_a:
     sound_priority: {glass: 0.95, alarm: 0.95, doorbell: 0.8, knock: 0.7, default: 0.3}
   cooldowns:
     greet_same_person_s: 300
+    greet_anyone_s: 60      # identity churn must never cause rapid re-greeting
   think_timeout_s: 12
   select_timeout_s: 4
 

@@ -85,6 +85,10 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
             key = f"greet:{delib.entity_ids[0] if delib.entity_ids else 'unknown'}"
             if time.time() - world.last_action_ts.get(key, 0) < cooldown:
                 return False, "greeting cooldown"
+            # global greet cooldown: identity churn must never cause rapid re-greeting
+            global_cd = config.get("node_a.cooldowns.greet_anyone_s", 60)
+            if time.time() - world.last_action_ts.get("greet:*", 0) < global_cd:
+                return False, "global greeting cooldown"
     if action.kind == "remember":
         if not (action.args or {}).get("statement"):
             return False, "remember without statement"
@@ -98,3 +102,4 @@ def mark_executed(world, delib: Deliberation, action: Action) -> None:
     if action.kind in ("say", "ask_user") and delib.event_type == "person_enters":
         key = f"greet:{delib.entity_ids[0] if delib.entity_ids else 'unknown'}"
         world.last_action_ts[key] = time.time()
+        world.last_action_ts["greet:*"] = time.time()

@@ -54,8 +54,12 @@ class Orchestrator:
             if det.cls != "person":
                 continue
             if frame.scene_delta == "new_track":
-                eid, name, identity = self.world.person_appeared(det.track_id)
+                eid, name, identity, reappeared = self.world.person_appeared(det.track_id)
                 who = name or "someone new"
+                if reappeared:
+                    # object permanence: same person, brief tracking gap — no re-greet
+                    self.world.trace("-", "reappearance", {"entity": eid})
+                    continue
                 ev = self.world.add_event(
                     "person_entered", f"{who} came into view",
                     [eid], config.get("node_a.salience.person_priority", 0.7))

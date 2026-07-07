@@ -64,14 +64,31 @@ class WorldModel:
 
     # ---------------------------------------------------------- presence
 
+    REAPPEAR_WINDOW_S = 30.0  # object permanence: brief absence != new person
+
     def person_appeared(self, track_id: str, embedding: Optional[list[float]] = None
-                        ) -> tuple[str, Optional[str], str]:
-        """-> (entity_id, name|None, identity: known|unknown|uncertain)"""
+                        ) -> tuple[str, Optional[str], str, bool]:
+        """-> (entity_id, name|None, identity: known|unknown|uncertain, is_reappearance)
+
+        Deterministic object permanence (v2 §2.4): without face identity, a person
+        entity that went absent moments ago and a new track appearing shortly after
+        are treated as the same person — tracker flaps must not mint new people."""
         name, identity, eid = None, "unknown", None
         if embedding is not None:
             match = self.match_face(embedding)
             if match:
                 eid, name, identity = match
+        reappeared = False
+        if eid is None:
+            row = self.db.execute(
+                "SELECT id, name FROM entities WHERE kind='person' AND present=0"
+                " AND last_seen > ? ORDER BY last_seen DESC LIMIT 1",
+                (time.time() - self.REAPPEAR_WINDOW_S,),
+            ).fetchone()
+            if row:
+                eid, name = row
+                identity = "reappeared"
+                reappeared = True
         if eid is None:
             eid = new_id()
             self.db.execute(
@@ -88,7 +105,7 @@ class WorldModel:
         self.present[eid] = {
             "name": name, "track_id": track_id, "since": time.time(), "attending": 0.0
         }
-        return eid, name, identity
+        return eid, name, identity, reappeared
 
     def person_left(self, track_id: str) -> Optional[str]:
         for eid, info in list(self.present.items()):

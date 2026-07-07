@@ -52,15 +52,16 @@ def test_build_think_user_sections():
 
 
 def test_tracker_new_and_lost():
-    tr = CentroidTracker(lost_after_s=0.0)
-    current, new_ids, lost = tr.update([(0.1, 0.1, 0.3, 0.5)])
-    assert len(new_ids) == 1 and not lost
-    # same box next frame -> same id
-    current2, new2, _ = tr.update([(0.11, 0.1, 0.31, 0.5)])
-    assert not new2 and current2[0][0] == current[0][0]
-    # far box -> new id
-    _, new3, _ = tr.update([(0.8, 0.8, 0.95, 0.99)])
-    assert len(new3) == 1
+    tr = CentroidTracker(lost_after_s=5.0)
+    box = (0.1, 0.1, 0.3, 0.5)
+    born = []
+    for _ in range(CentroidTracker.MIN_HITS):
+        current, new_ids, _ = tr.update([box])
+        born += new_ids
+    assert len(born) == 1 and current[0][0] == born[0]
+    # same box next frame -> same id, no new birth
+    current2, new2, _ = tr.update([box])
+    assert not new2 and current2[0][0] == born[0]
 
 
 def test_narrative_buckets():
@@ -100,3 +101,28 @@ def test_on_transcript_queues_deliberation(tmp_path, monkeypatch):
     facts = o.world.facts_for_prompt(5)
     assert any("towels" in f for f in facts), "deterministic remember must commit"
     config.load.cache_clear()
+
+
+def test_tracker_debounce_and_merge():
+    """One-frame jitter must not birth tracks; overlapping boxes are one person."""
+    tr = CentroidTracker(lost_after_s=5.0)
+    # single flicker frame -> nothing born
+    _, born, _ = tr.update([(0.4, 0.2, 0.6, 0.9)])
+    assert born == []
+    # persists 2 more frames -> born once
+    _, born2, _ = tr.update([(0.41, 0.2, 0.61, 0.9)])
+    _, born3, _ = tr.update([(0.42, 0.2, 0.62, 0.9)])
+    assert born2 == [] and len(born3) == 1
+    # duplicate overlapping detection -> still one track
+    current, born4, _ = tr.update([(0.42, 0.2, 0.62, 0.9), (0.43, 0.22, 0.63, 0.88)])
+    assert born4 == [] and len(current) == 1
+
+
+def test_person_reappearance_object_permanence(tmp_path):
+    from lucas_node_a.world_model import WorldModel
+    w = WorldModel(str(tmp_path / "w.db"))
+    eid1, _, _, re1 = w.person_appeared("trk_a")
+    assert re1 is False
+    w.person_left("trk_a")
+    eid2, _, identity, re2 = w.person_appeared("trk_b")  # seconds later, new track id
+    assert re2 is True and eid2 == eid1 and identity == "reappeared"
