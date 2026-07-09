@@ -104,18 +104,22 @@ def test_on_transcript_queues_deliberation(tmp_path, monkeypatch):
 
 
 def test_tracker_debounce_and_merge():
-    """One-frame jitter must not birth tracks; overlapping boxes are one person."""
+    """Sub-threshold jitter must not birth tracks; overlapping boxes are one person."""
     tr = CentroidTracker(lost_after_s=5.0)
-    # single flicker frame -> nothing born
-    _, born, _ = tr.update([(0.4, 0.2, 0.6, 0.9)])
-    assert born == []
-    # persists 2 more frames -> born once
-    _, born2, _ = tr.update([(0.41, 0.2, 0.61, 0.9)])
-    _, born3, _ = tr.update([(0.42, 0.2, 0.62, 0.9)])
-    assert born2 == [] and len(born3) == 1
-    # duplicate overlapping detection -> still one track
-    current, born4, _ = tr.update([(0.42, 0.2, 0.62, 0.9), (0.43, 0.22, 0.63, 0.88)])
-    assert born4 == [] and len(current) == 1
+    box = (0.4, 0.2, 0.6, 0.9)
+    # up to MIN_HITS-1 consecutive frames -> nothing born
+    for _ in range(CentroidTracker.MIN_HITS - 1):
+        _, born, _ = tr.update([box])
+        assert born == []
+    # one more frame -> born exactly once
+    _, born_final, _ = tr.update([box])
+    assert len(born_final) == 1
+    # duplicate overlapping detection -> still one track, no second birth
+    current, born_dup, _ = tr.update([box, (0.43, 0.22, 0.63, 0.88)])
+    assert born_dup == [] and len(current) == 1
+    # tiny box (below MIN_AREA) is ignored entirely
+    _, born_tiny, _ = tr.update([(0.5, 0.5, 0.55, 0.58)])
+    assert born_tiny == []
 
 
 def test_person_reappearance_object_permanence(tmp_path):
