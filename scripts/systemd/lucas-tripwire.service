@@ -1,0 +1,24 @@
+[Unit]
+Description=Lucas IMX500 vision tripwire (always-on person detection)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=robot-vision
+SupplementaryGroups=video
+WorkingDirectory=/home/robot-vision/lucas
+Environment=PYTHONPATH=packages/common:packages/node_a
+Environment=LUCAS_CONFIG=/home/robot-vision/lucas/config/lucas.yaml
+Environment=LUCAS_NODE=a
+ExecStart=/home/robot-vision/lucas_venv/bin/python -m lucas_node_a.perception.imx500_tripwire
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=10
+StandardOutput=append:/var/log/lucas/tripwire.log
+StandardError=append:/var/log/lucas/tripwire.log
+
+[Install]
+WantedBy=multi-user.target
