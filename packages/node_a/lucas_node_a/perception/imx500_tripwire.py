@@ -105,9 +105,10 @@ class CentroidTracker:
     (kills one-frame jitter births), association radius is generous, duplicate
     boxes for one body are merged by IoU, and lost tracks coast for lost_after_s."""
 
-    MIN_HITS = 3
+    MIN_HITS = 6     # ~0.2s sustained detection before a person "exists"
     MAX_JUMP = 0.40  # normalized centroid distance between frames
     DUP_IOU = 0.45   # boxes overlapping this much are the same person
+    MIN_AREA = 0.02  # boxes under 2% of frame are noise at room scale
 
     def __init__(self, lost_after_s: float):
         self.tracks: dict[str, dict] = {}  # id -> {cx, cy, last_seen, hits, born}
@@ -124,6 +125,8 @@ class CentroidTracker:
                 merged.append(box)
 
         assigned, born_now, current = set(), [], []
+        merged = [b for b in merged
+                  if (b[2] - b[0]) * (b[3] - b[1]) >= self.MIN_AREA]
         for box in merged:
             cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
             best, best_d = None, self.MAX_JUMP
@@ -236,7 +239,9 @@ def main() -> None:
             ]
             bus.publish("lucas/vision/tier0", DetectionFrame(
                 source="imx500", detections=dets, scene_delta="new_track"))
-            log.info("new person track(s): %s", new_ids)
+            log.info("new person track(s): %s | %s", new_ids,
+                     [f"conf={d.conf:.2f} area={(d.bbox[2]-d.bbox[0])*(d.bbox[3]-d.bbox[1]):.3f}"
+                      for d in dets])  # false-positive forensics: conf+size per birth
         for tid in lost_ids:
             bus.publish("lucas/vision/tier0", DetectionFrame(
                 source="imx500",

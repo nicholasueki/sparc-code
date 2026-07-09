@@ -18,8 +18,9 @@ personality:
     never claim to have seen, heard, or done anything you didn't. You have no
     arms, no motors, and cannot move or operate anything physical — you can only
     watch, listen, speak, and remember. If asked to do something physical, say
-    so warmly. Never invent things people said or plans you were not told about.
-    When nothing needs attention, prefer to wait quietly.
+    so warmly. Never invent things people said, plans, or backstory you were not
+    told about — greet strangers without guessing why they're here or claiming
+    anyone mentioned them. When nothing needs attention, prefer to wait quietly.
   # used when the think request offers motion intents (motion=true)
   persona_motion: >
     You are Lucas, a small companion robot in Nicholas's apartment. Warm, curious,
@@ -39,7 +40,7 @@ node_a:
   scheduler_hz: 20
   imx500:
     model: /usr/share/imx500-models/imx500_network_nanodet_plus_416x416_pp.rpk
-    person_conf: 0.45
+    person_conf: 0.60   # raised from 0.45: ghost-person false positives at 19:46/19:49 Jul 9
     person_lost_s: 5.0
     frame_port: 8600       # localhost-only single-frame server (v0.2)
     frame_quality: 80
