@@ -136,7 +136,32 @@ def transcribe(pcm: bytes) -> str:
         audio, path_or_hf_repo=CFG.get("mlx_whisper_model",
                                        "mlx-community/whisper-base-mlx"),
         language="en", fp16=True)
-    return (out.get("text") or "").strip()
+    # hallucination gates (standard whisper thresholds): drop segments the model
+    # itself flags as probably-not-speech / degenerate repetition
+    kept = []
+    for seg in out.get("segments", []):
+        if seg.get("no_speech_prob", 0) > 0.5:
+            continue
+        if seg.get("avg_logprob", 0) < -1.0:
+            continue
+        if seg.get("compression_ratio", 1) > 2.4:
+            continue
+        kept.append(seg.get("text", ""))
+    return " ".join(kept).strip()
+
+
+def _looks_hallucinated(text: str) -> bool:
+    """Final text-level guard: degenerate repetition ('paid paid paid...')."""
+    words = text.lower().split()
+    if len(words) >= 6:
+        run = 1
+        for a, b in zip(words, words[1:]):
+            run = run + 1 if a == b else 1
+            if run >= 4:
+                return True
+        if len(set(words)) <= max(2, len(words) // 6):
+            return True
+    return False
 
 
 def mic_loop() -> None:
@@ -166,9 +191,18 @@ def mic_loop() -> None:
         except Exception as e:
             log.warning("stt failed: %s", e)
             return
-        if text and len(text) > 1:
-            log.info("HEARD: %r", text)
-            publish_transcript(text, conf=0.9)
+        if not text or len(text) <= 1:
+            return
+        if _looks_hallucinated(text):
+            log.info("dropped (hallucination): %.60r", text)
+            return
+        # interim wake gate: without openWakeWord, only address-by-name reaches
+        # Lucas — otherwise he answers the TV, music, and passing conversation
+        if CFG.get("require_name", True) and "lucas" not in text.lower():
+            log.info("dropped (not addressed to Lucas): %.60r", text)
+            return
+        log.info("HEARD: %r", text)
+        publish_transcript(text, conf=0.9)
 
     log.info("ears live: mic -> VAD -> 10H whisper (device=%s)", sd.default.device)
     with sd.RawInputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",

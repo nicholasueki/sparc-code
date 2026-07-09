@@ -86,7 +86,8 @@ node_c:
     tts_voice: Samantha
     tts_rate_wpm: 190
     echo_tail_s: 0.7
-    vad_aggressiveness: 2
+    vad_aggressiveness: 3   # strict: cuts marginal/ambient audio before Whisper
+    require_name: true      # interim wake word: say "Lucas, ..." to be heard
     min_utt_ms: 400
     silence_end_ms: 700
     max_utt_s: 12
