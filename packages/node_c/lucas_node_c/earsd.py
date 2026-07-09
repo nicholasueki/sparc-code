@@ -199,14 +199,19 @@ def mic_loop() -> None:
                 preroll.append(frame)
 
 
-def main() -> None:
-    threading.Thread(target=speaker_loop, daemon=True, name="voice").start()
-    while True:  # mic loop restarts on device errors (e.g., permission granted late)
+def _forever(fn, name: str) -> None:
+    while True:  # every loop survives transient failures (broker down, device busy)
         try:
-            mic_loop()
+            fn()
         except Exception:
-            log.exception("mic loop crashed; retrying in 5s")
+            log.exception("%s crashed; retrying in 5s", name)
             time.sleep(5)
+
+
+def main() -> None:
+    threading.Thread(target=_forever, args=(speaker_loop, "voice"),
+                     daemon=True, name="voice").start()
+    _forever(mic_loop, "ears")
 
 
 if __name__ == "__main__":
