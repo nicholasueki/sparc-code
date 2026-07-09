@@ -59,6 +59,9 @@ class Orchestrator:
                 if reappeared:
                     # object permanence: same person, brief tracking gap — no re-greet
                     self.world.trace("-", "reappearance", {"entity": eid})
+                    self.bus.publish_json("lucas/debug/thought", {
+                        "kind": "note",
+                        "text": "same person returned — no re-greet (object permanence)"})
                     continue
                 ev = self.world.add_event(
                     "person_entered", f"{who} came into view",
@@ -251,6 +254,9 @@ class Orchestrator:
         ok, reason = validate(self.world, d, action)
         if not ok:
             self.world.trace(d.id, "vetoed", {"reason": reason, "action": action.kind})
+            self.bus.publish_json("lucas/debug/thought", {
+                "kind": "note",
+                "text": f"vetoed {action.kind} ({reason}) — doing nothing instead"})
             action = Action(kind="wait", why=f"vetoed: {reason}", fallback_level=3)
         self.execute(d, action)
 
