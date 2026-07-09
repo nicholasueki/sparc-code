@@ -67,7 +67,8 @@ def on_message(client, userdata, msg):
     elif t == "lucas/tts/say":
         line("yellow", "LUCAS", f"{C['bold']}\"{data.get('text', '')}\"{C['reset']}")
     elif t == "lucas/debug/thought":
-        line("magenta", "EVENT", data.get("event", ""))
+        cam = " 📷" if data.get("has_image") else ""
+        line("magenta", "EVENT", data.get("event", "") + cam)
         if data.get("scene"):
             line("blue", "scene", C["dim"] + wrap(data["scene"]) + C["reset"])
         if data.get("memory"):

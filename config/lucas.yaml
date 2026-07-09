@@ -41,6 +41,9 @@ node_a:
     model: /usr/share/imx500-models/imx500_network_nanodet_plus_416x416_pp.rpk
     person_conf: 0.45
     person_lost_s: 5.0
+    frame_port: 8600       # localhost-only single-frame server (v0.2)
+    frame_quality: 80
+  vision_in_loop: true     # attach one live frame to visual-event thinks; NEVER persisted
   identity:
     known_threshold: 0.55
     uncertain_threshold: 0.40
@@ -50,7 +53,7 @@ node_a:
   cooldowns:
     greet_same_person_s: 300
     greet_anyone_s: 60      # identity churn must never cause rapid re-greeting
-  think_timeout_s: 12
+  think_timeout_s: 30    # image prefill adds ~3-6s on visual events (v0.2)
   select_timeout_s: 4
 
 node_b:

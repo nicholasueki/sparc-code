@@ -171,11 +171,35 @@ class Orchestrator:
 
     # ---------------------------------------------------------- pipeline
 
+    def _maybe_frame(self, d: Deliberation) -> str | None:
+        """One live JPEG (base64) for events where seeing helps. Fail-open:
+        no frame is never an error, just a text-only think. Never persisted."""
+        if not config.get("node_a.vision_in_loop", True):
+            return None
+        wants = d.event_type in ("person_enters", "sound_event") or (
+            d.event_type == "person_speaks" and self.world.present
+        )
+        if not wants:
+            return None
+        try:
+            import base64
+
+            r = httpx.get(
+                f"http://127.0.0.1:{config.get('node_a.frame_port', 8600)}/frame.jpg",
+                timeout=2.5,
+            )
+            if r.status_code == 200:
+                return base64.b64encode(r.content).decode()
+        except Exception:
+            pass
+        return None
+
     def pipeline(self, d: Deliberation) -> None:
         # ENRICHED: hot-state read (identity/attending already in world model)
         d.stage = Stage.ENRICHED
         # DECIDED: one folded cortex call (options + choice) with L1/L2 fallbacks
         memory_brief = self._memory_briefing(d)
+        image_b64 = self._maybe_frame(d)
         req = ThinkRequest(
             deliberation_id=d.id,
             scene=d.snapshot,
@@ -185,6 +209,7 @@ class Orchestrator:
                 for t in self.world.conversation[-12:]
             ],
             event=d.trigger_desc,
+            image_b64=image_b64,
             max_options=3,  # eval: 3 options = same pass rate, ~30% faster than 5
         )
         t0 = time.time()
@@ -198,13 +223,15 @@ class Orchestrator:
                 "ms": int((time.time() - t0) * 1000),
                 "choice": resp.choice, "why": resp.why,
                 "fallback_level": resp.fallback_level,
-                "n_options": len(resp.options.options)})
+                "n_options": len(resp.options.options),
+                "has_image": image_b64 is not None})
             # publish the full thought to the live watcher via the LOCAL broker
             # (cortexd's own cross-node MQTT publish is unreliable under MLX; the
             # orchestrator owns the broker box, so this hop never flaps)
             self.bus.publish_json("lucas/debug/thought", {
                 "kind": "think", "deliberation_id": d.id, "event": d.trigger_desc,
                 "scene": d.snapshot, "memory": memory_brief, "thinking": resp.thinking,
+                "has_image": image_b64 is not None,
                 "options": [{"idx": o.idx, "action": o.action, "args": o.args, "tone": o.tone}
                             for o in resp.options.options],
                 "choice": resp.choice, "backup": resp.backup, "why": resp.why,

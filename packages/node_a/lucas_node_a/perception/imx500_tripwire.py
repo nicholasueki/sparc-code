@@ -4,12 +4,20 @@ Runs the postprocessed .rpk on the sensor NPU, tracks person boxes with a
 tiny nearest-centroid tracker, and emits DetectionFrame(new_track/lost_track)
 on the bus. ~0 host CPU: we only parse output tensors.
 
+Also serves single frames on demand (localhost only) for the VLM-in-the-loop
+path: GET 127.0.0.1:<frame_port>/frame.jpg -> one JPEG from the next camera
+request. PRIVACY: frames are produced on demand, held in memory, and never
+written to disk or exposed beyond localhost.
+
 Runs standalone in its own process: python -m lucas_node_a.perception.imx500_tripwire
 """
 from __future__ import annotations
 
+import io
 import logging
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from lucas_common import config
 from lucas_common.bus import Bus
@@ -18,6 +26,69 @@ from lucas_common.types import Detection, DetectionFrame, new_id
 log = logging.getLogger("lucas.imx500")
 
 PERSON_CLASS = 0  # COCO person in the RPi nanodet labels
+
+
+class FrameGrabber:
+    """Hands one JPEG from the camera loop to an HTTP requester.
+
+    The camera loop is the single owner of the Picamera2 pipeline; requesters
+    set a flag and the loop fulfils it on its next iteration (no concurrent
+    camera access, no saved files)."""
+
+    def __init__(self, quality: int = 80):
+        self.quality = quality
+        self._want = threading.Event()
+        self._done = threading.Event()
+        self._jpeg: bytes | None = None
+
+    def request(self, timeout: float = 2.0) -> bytes | None:
+        self._done.clear()
+        self._want.set()
+        return self._jpeg if self._done.wait(timeout) else None
+
+    def offer(self, make_array) -> None:
+        """Called by the camera loop every iteration; cheap no-op unless wanted."""
+        if not self._want.is_set():
+            return
+        try:
+            from PIL import Image
+
+            arr = make_array()
+            if arr.shape[-1] == 4:  # XBGR8888 -> drop X, reorder to RGB
+                arr = arr[:, :, 2::-1]
+            img = Image.fromarray(arr)
+            buf = io.BytesIO()
+            img.save(buf, "JPEG", quality=self.quality)
+            self._jpeg = buf.getvalue()
+        except Exception:
+            log.exception("frame grab failed")
+            self._jpeg = None
+        finally:
+            self._want.clear()
+            self._done.set()
+
+
+def start_frame_server(grabber: FrameGrabber, port: int) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            jpeg = grabber.request(2.0) if self.path.startswith("/frame") else None
+            if jpeg:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(jpeg)))
+                self.end_headers()
+                self.wfile.write(jpeg)
+            else:
+                self.send_response(503)
+                self.end_headers()
+
+        def log_message(self, *a):  # keep the tripwire log clean
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)  # localhost ONLY
+    threading.Thread(target=server.serve_forever, daemon=True,
+                     name="frame-server").start()
+    log.info("frame server on 127.0.0.1:%d (localhost only)", port)
 
 
 def _iou(a, b) -> float:
@@ -129,13 +200,21 @@ def main() -> None:
     bus = Bus(client_id="imx500-tripwire")
     bus.start()
     tracker = CentroidTracker(float(cfg.get("person_lost_s", 5.0)))
+    grabber = FrameGrabber(quality=int(cfg.get("frame_quality", 80)))
+    start_frame_server(grabber, int(cfg.get("frame_port", 8600)))
 
-    camera_config = picam2.create_preview_configuration(buffer_count=6)
+    camera_config = picam2.create_preview_configuration(
+        main={"size": (640, 480)}, buffer_count=6)
     picam2.start(camera_config)
     log.info("IMX500 tripwire live (model=%s)", cfg["model"])
 
     while True:
-        metadata = picam2.capture_metadata()
+        request = picam2.capture_request()
+        try:
+            metadata = request.get_metadata()
+            grabber.offer(lambda: request.make_array("main"))
+        finally:
+            request.release()
         outputs = imx500.get_outputs(metadata, add_batch=True)
         if outputs is None:
             continue

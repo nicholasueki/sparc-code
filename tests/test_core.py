@@ -126,3 +126,11 @@ def test_person_reappearance_object_permanence(tmp_path):
     w.person_left("trk_a")
     eid2, _, identity, re2 = w.person_appeared("trk_b")  # seconds later, new track id
     assert re2 is True and eid2 == eid1 and identity == "reappeared"
+
+
+def test_camera_section_only_when_image_attached():
+    req = ThinkRequest(deliberation_id="d2", scene="A room.", event="someone waved",
+                       image_b64="aGVsbG8=")
+    assert "CAMERA:" in prompts.build_think_user(req)
+    req2 = ThinkRequest(deliberation_id="d3", scene="A room.", event="idle check")
+    assert "CAMERA:" not in prompts.build_think_user(req2)

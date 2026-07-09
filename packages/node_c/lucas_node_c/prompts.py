@@ -50,6 +50,13 @@ def build_think_user(req: ThinkRequest) -> str:
         turns = "\n".join(f"{t['role']}: {t['text']}" for t in req.conversation[-12:])
         parts.append(f"CONVERSATION:\n{turns}")
     parts.append(f"EVENT: {req.event}")
+    if req.image_b64:
+        parts.append(
+            "CAMERA: a live frame from your camera is attached. Use what you can "
+            "actually SEE — who is there, gestures (like waving), what they're doing, "
+            "notable objects — in your reaction. Mention only what is visible; if the "
+            "frame is unclear, say nothing about it."
+        )
     parts.append(THINK_TASK.format(
         max_options=req.max_options,
         action_set=MOTION_ACTIONS if req.motion else BASE_ACTIONS,
