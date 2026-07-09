@@ -60,6 +60,7 @@ node_b:
   genaid_port: 8700
   hef_dir: /usr/local/hailo/resources/models/hailo10h
   llm_hef: Qwen2.5-1.5B-Instruct.hef
+  stt_hef: Whisper-Base.hef
   selector: {decode: greedy, max_tokens: 3, prompt_budget: 300}
   audio: {enabled: auto}   # auto = probe for mic/speaker at boot
 
@@ -81,3 +82,11 @@ node_c:
     min_score: 0.35
     briefing_token_budget: 120
   queue_depth: 3
+  ears:                     # v0.3-interim: tokenator mic+speakers as Lucas's audio
+    tts_voice: Samantha
+    tts_rate_wpm: 190
+    echo_tail_s: 0.7
+    vad_aggressiveness: 2
+    min_utt_ms: 400
+    silence_end_ms: 700
+    max_utt_s: 12
