@@ -52,13 +52,18 @@ class HailoModel:
         for out in self.model.outputs:
             self.model.output(out.name).set_format_type(FormatType.FLOAT32)
         self.cm = self.model.configure()
-        self.out_names = [o.name for o in self.model.outputs]
+        self.out_shapes = {o.name: tuple(o.shape) for o in self.model.outputs}
 
     def run(self, img: np.ndarray) -> dict[str, np.ndarray]:
         bindings = self.cm.create_bindings()
         bindings.input().set_buffer(np.ascontiguousarray(img))
+        # output buffers must be allocated and bound as views BEFORE run,
+        # otherwise HailoRT raises "not configured as view" (status 6)
+        outputs = {n: np.empty(s, dtype=np.float32) for n, s in self.out_shapes.items()}
+        for name, buf in outputs.items():
+            bindings.output(name).set_buffer(buf)
         self.cm.run([bindings], timeout=3000)
-        return {n: bindings.output(n).get_buffer() for n in self.out_names}
+        return outputs
 
 
 def _maybe_sigmoid(x: np.ndarray) -> np.ndarray:
@@ -130,10 +135,17 @@ def main() -> None:
     conf_t = float(cfg.get("face_conf", 0.55))
     frame_url = f"http://127.0.0.1:{config.get('node_a.imx500.frame_port', 8600)}/frame.jpg"
 
-    vdevice = VDevice()
+    # round-robin scheduler lets both models be co-resident on one core and
+    # auto-activate per inference (without it, running a 2-model vdevice raises
+    # HAILO_INVALID_OPERATION because neither network group is active)
+    from hailo_platform import HailoSchedulingAlgorithm
+
+    vp = VDevice.create_params()
+    vp.scheduling_algorithm = HailoSchedulingAlgorithm.ROUND_ROBIN
+    vdevice = VDevice(vp)
     scrfd = HailoModel(vdevice, SCRFD_HEF)
     arcface = HailoModel(vdevice, ARCFACE_HEF)
-    log.info("hailo-8 face pipeline resident (scrfd + arcface)")
+    log.info("hailo-8 face pipeline resident (scrfd + arcface, round-robin)")
 
     bus = Bus(client_id="face-enrich")
     presence = PresenceMirror(bus)
