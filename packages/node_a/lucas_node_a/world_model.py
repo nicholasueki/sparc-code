@@ -107,6 +107,30 @@ class WorldModel:
         }
         return eid, name, identity, reappeared
 
+    def enroll_present(self, entity_id: str, name: str) -> Optional[str]:
+        """Enroll the currently-present entity under `name`, using the rolling
+        embedding buffer the enrichment loop has been filling. Deterministic;
+        called only after the validator approves an enroll_face action."""
+        info = self.present.get(entity_id)
+        embs = (info or {}).get("embs", [])
+        if info is None or len(embs) < 3:
+            return None
+        emb = np.mean(np.asarray(embs, dtype=np.float32), axis=0)
+        emb = emb / (np.linalg.norm(emb) + 1e-9)
+        sims = [float(np.asarray(e) @ emb / (np.linalg.norm(e) + 1e-9)) for e in embs]
+        if min(sims) < 0.5:  # inconsistent samples: possibly two faces — refuse
+            return None
+        with self.db:
+            self.db.execute("UPDATE entities SET name=? WHERE id=?", (name, entity_id))
+            self.db.execute(
+                "INSERT OR REPLACE INTO known_faces(entity_id, name, embedding)"
+                " VALUES(?,?,?)", (entity_id, name, emb.astype(np.float32).tobytes()))
+        info["name"] = name
+        return entity_id
+
+    def known_names(self) -> list[str]:
+        return [r[0] for r in self.db.execute("SELECT name FROM known_faces")]
+
     def update_identity(self, entity_id: str, embedding: list[float]
                         ) -> tuple[str, Optional[str], str]:
         """Resolve a live entity's identity from a face embedding.

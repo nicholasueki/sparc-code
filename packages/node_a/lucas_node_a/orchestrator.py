@@ -86,6 +86,10 @@ class Orchestrator:
             if len(self.world.present) != 1:
                 return  # MVP: only resolve identity when unambiguous (v0.5: association)
             eid = next(iter(self.world.present))
+            # rolling buffer for seamless enrollment (enroll_face action)
+            embs = self.world.present[eid].setdefault("embs", [])
+            embs.append(det.face_embedding)
+            del embs[:-10]
             new_eid, name, quality = self.world.update_identity(eid, det.face_embedding)
             if name and quality == "known":
                 if eid in self._pending_births:  # keep the greet pending under the merged id
@@ -346,6 +350,23 @@ class Orchestrator:
             ack = "Got it — I'll remember that."
             self.bus.publish("lucas/tts/say", SpeakRequest(text=ack))
             self.world.conversation.append({"role": "lucas", "text": ack, "ts": time.time()})
+        elif action.kind == "enroll_face":
+            name = str(action.args.get("name", "")).strip()
+            unknowns = [e for e, i in self.world.present.items() if not i.get("name")]
+            eid = self.world.enroll_present(unknowns[0], name) if unknowns else None
+            if eid:
+                self.world.add_event("enrolled", f"Lucas learned {name}'s face",
+                                     [eid], 0.7)
+                self._commit_fact(f"{name} is someone Lucas knows by sight",
+                                  source="observed", confidence=0.8)
+                ack = f"Nice to meet you, {name} — I'll remember your face."
+                self.bus.publish(
+                    "lucas/tts/say", SpeakRequest(text=ack))
+                self.world.conversation.append(
+                    {"role": "lucas", "text": ack, "ts": time.time()})
+                log.info("LUCAS ENROLLED FACE: %s (%s)", name, eid)
+            else:
+                log.warning("enroll_face failed post-validation (samples inconsistent)")
         elif action.kind == "set_reminder":
             self.world.add_event("reminder_set",
                                  f"reminder: {action.args.get('text','')}", d.entity_ids, 0.5)

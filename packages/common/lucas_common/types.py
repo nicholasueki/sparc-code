@@ -74,6 +74,7 @@ class SpeakRequest(Msg):
 
 ActionKind = Literal[
     "say", "ask_user", "wait", "remember", "set_reminder",
+    "enroll_face",  # v0.4: remember a new person's face by name (validator-gated)
     # motion intents (schema ships pre-hardware; execution gated by motion.enabled)
     "look_at", "approach", "back_up", "stop_moving",
 ]

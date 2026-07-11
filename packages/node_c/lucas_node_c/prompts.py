@@ -22,7 +22,9 @@ and a backup. Reply with ONLY this JSON, no other text:
 {{"options":[{{"idx":0,"action":"say","args":{{"text":"..."}},"tone":"warm","risk":"low","novelty":0.3}}],
 "choice":0,"backup":1,"why":"one short sentence"}}
 Rules: args for say/ask_user = {{"text": ...}} (1-2 short sentences, in character); \
-remember = {{"statement": ...}}; set_reminder = {{"text": ..., "in_minutes": N}}; wait = {{}}.{motion_rules}"""
+remember = {{"statement": ...}}; set_reminder = {{"text": ..., "in_minutes": N}}; wait = {{}}; \
+enroll_face = {{"name": ...}} — ONLY when someone Lucas doesn't recognize has just told \
+you their name in this conversation and they are visible right now.{motion_rules}"""
 
 MOTION_RULES = """ \
 Motion args: look_at = {"target": "<person name|sound|door|window>"}; \
@@ -30,7 +32,7 @@ approach = {"target": "<person name>", "standoff_m": 0.5-2.0}; \
 back_up = {"distance_m": 0.1-1.0}; stop_moving = {}. \
 Move only when it clearly helps; never move toward someone without a reason they'd welcome."""
 
-BASE_ACTIONS = "say, ask_user, wait, remember, set_reminder"
+BASE_ACTIONS = "say, ask_user, wait, remember, set_reminder, enroll_face"
 MOTION_ACTIONS = BASE_ACTIONS + ", look_at, approach, back_up, stop_moving"
 
 

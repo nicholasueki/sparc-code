@@ -184,3 +184,28 @@ def test_scrfd_decode_shapes():
     box, lm, score = det
     assert score > 0.99 and lm.shape == (5, 2)
     assert box[0] < box[2] and box[1] < box[3]
+
+
+def test_enroll_face_validation_and_commit(tmp_path):
+    """enroll_face: vetoed without samples/valid name; commits with them."""
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.deliberation import Deliberation, validate
+    from lucas_common.types import Action
+    w = WorldModel(str(tmp_path / "w.db"))
+    eid, *_ = w.person_appeared("trk_m")
+    d = Deliberation(event_type="person_speaks", trigger_desc="x", entity_ids=[eid])
+
+    ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "Maya"}))
+    assert not ok and "samples" in why                      # no embeddings yet
+    ok, _ = validate(w, d, Action(kind="enroll_face", args={"name": "x9!!"}))
+    assert not ok                                           # implausible name
+
+    w.present[eid]["embs"] = [[1.0] + [0.0] * 511] * 4      # stable samples
+    ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "Maya"}))
+    assert ok, why
+    assert w.enroll_present(eid, "Maya") == eid
+    assert w.present[eid]["name"] == "Maya"
+    assert "Maya" in w.known_names()
+    # second enrollment of the same name gets vetoed
+    ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "maya"}))
+    assert not ok and "already enrolled" in why

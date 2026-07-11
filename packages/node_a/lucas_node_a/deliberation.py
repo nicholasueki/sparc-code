@@ -107,6 +107,17 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
     if action.kind == "remember":
         if not (action.args or {}).get("statement"):
             return False, "remember without statement"
+    if action.kind == "enroll_face":
+        name = str((action.args or {}).get("name", "")).strip()
+        if not (2 <= len(name) <= 24 and name.replace(" ", "").replace("-", "").isalpha()):
+            return False, "enroll_face: implausible name"
+        if name.lower() in (n.lower() for n in world.known_names()):
+            return False, f"enroll_face: {name} already enrolled"
+        unknowns = [e for e, i in world.present.items() if not i.get("name")]
+        if len(world.present) != 1 or len(unknowns) != 1:
+            return False, "enroll_face: need exactly one unknown person present"
+        if len(world.present[unknowns[0]].get("embs", [])) < 3:
+            return False, "enroll_face: not enough face samples yet"
     if action.kind == "set_reminder":
         if not (action.args or {}).get("text"):
             return False, "reminder without text"
