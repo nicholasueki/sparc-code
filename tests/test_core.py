@@ -152,3 +152,35 @@ def test_scene_summarizes_own_speech_keeps_others_verbatim(tmp_path):
     assert "jasmine tea" in scene            # others verbatim
     assert "xyzzy" not in scene              # own words summarized
     assert "Lucas spoke to them" in scene
+
+
+def test_identity_merge_and_greet_wait(tmp_path):
+    """Face embedding resolves a temp entity into the enrolled person."""
+    from lucas_node_a.world_model import WorldModel
+    w = WorldModel(str(tmp_path / "w.db"))
+    emb = [1.0] + [0.0] * 511
+    known = w.enroll_face("Nicholas", emb)
+    eid, name, identity, _ = w.person_appeared("trk_x")   # unknown at birth
+    assert name is None
+    new_eid, name2, quality = w.update_identity(eid, emb)
+    assert new_eid == known and name2 == "Nicholas" and quality == "known"
+    assert w.present[known]["name"] == "Nicholas"
+    assert eid not in w.present  # temp entity absorbed
+
+
+def test_scrfd_decode_shapes():
+    from lucas_node_a.perception.face_enrich import decode_scrfd, SCRFD_BRANCHES
+    import numpy as np
+    outs = {}
+    for stride, (s, b, k) in SCRFD_BRANCHES.items():
+        h = 640 // stride
+        outs[s] = np.full((h, h, 2), -8.0, np.float32)   # logits ~ 0 prob
+        outs[b] = np.ones((h, h, 8), np.float32)
+        outs[k] = np.ones((h, h, 20), np.float32)
+    assert decode_scrfd(outs, conf_t=0.5) is None        # nothing confident
+    outs[SCRFD_BRANCHES[16][0]][10, 10, 0] = 8.0          # one hot face
+    det = decode_scrfd(outs, conf_t=0.5)
+    assert det is not None
+    box, lm, score = det
+    assert score > 0.99 and lm.shape == (5, 2)
+    assert box[0] < box[2] and box[1] < box[3]

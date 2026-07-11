@@ -45,6 +45,10 @@ node_a:
     frame_port: 8600       # localhost-only single-frame server (v0.2)
     frame_quality: 80
   vision_in_loop: true     # attach one live frame to visual-event thinks; NEVER persisted
+  face:                    # v0.4 identity enrichment (Hailo-8)
+    enrich_hz: 1.0
+    face_conf: 0.55
+    identity_wait_s: 2.5   # greet delay: give the face loop a chance to name them
   identity:
     known_threshold: 0.55
     uncertain_threshold: 0.40

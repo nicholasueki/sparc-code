@@ -1,0 +1,23 @@
+[Unit]
+Description=Lucas face-identity enrichment (Hailo-8 SCRFD + ArcFace)
+After=network-online.target mosquitto.service lucas-tripwire.service
+Wants=network-online.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=robot-vision
+WorkingDirectory=/home/robot-vision/lucas
+Environment=PYTHONPATH=packages/common:packages/node_a
+Environment=LUCAS_CONFIG=/home/robot-vision/lucas/config/lucas.yaml
+Environment=LUCAS_NODE=a
+ExecStart=/home/robot-vision/lucas_venv/bin/python -m lucas_node_a.perception.face_enrich
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=10
+StandardOutput=append:/var/log/lucas/enrich.log
+StandardError=append:/var/log/lucas/enrich.log
+
+[Install]
+WantedBy=multi-user.target

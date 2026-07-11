@@ -46,6 +46,8 @@ class Orchestrator:
         self._queue: list[tuple[float, float, Deliberation]] = []  # (-prio, ts, delib)
         self._lock = threading.Lock()
         self._pending_person: dict[str, str] = {}  # track_id -> deliberation id (merge)
+        # v0.4: births wait briefly for face identity before greeting (ENRICHED stage)
+        self._pending_births: dict[str, float] = {}  # entity_id -> greet deadline
 
     # ------------------------------------------------------------ ingest
 
@@ -63,24 +65,64 @@ class Orchestrator:
                         "kind": "note",
                         "text": "same person returned — no re-greet (object permanence)"})
                     continue
-                ev = self.world.add_event(
-                    "person_entered", f"{who} came into view",
-                    [eid], config.get("node_a.salience.person_priority", 0.7))
-                d = Deliberation(
-                    event_type="person_enters",
-                    trigger_desc=f"{who} just came into view"
-                    + ("" if name else " (Lucas doesn't recognize them)"),
-                    tier=Tier.COMPETE,
-                    priority=config.get("node_a.salience.person_priority", 0.7),
-                    entity_ids=[eid],
-                )
-                self._pending_person[det.track_id] = d.id
-                self.submit(d)
+                # v0.4: don't greet yet — give face enrichment a moment to name them
+                wait_s = float(config.get("node_a.face.identity_wait_s", 2.5))
+                self._pending_births[eid] = time.time() + wait_s
+                self.bus.publish_json("lucas/debug/thought", {
+                    "kind": "note",
+                    "text": f"person detected — waiting up to {wait_s:.0f}s for face identity"})
             elif frame.scene_delta == "lost_track":
                 eid = self.world.person_left(det.track_id)
                 self._pending_person.pop(det.track_id, None)
                 if eid:
+                    self._pending_births.pop(eid, None)
                     self.world.add_event("person_left", "they left Lucas's view", [eid], 0.3)
+
+    def on_rich(self, frame: DetectionFrame) -> None:
+        """Face embeddings from the Hailo-8 enrichment loop -> identity."""
+        for det in frame.detections:
+            if det.face_embedding is None:
+                continue
+            if len(self.world.present) != 1:
+                return  # MVP: only resolve identity when unambiguous (v0.5: association)
+            eid = next(iter(self.world.present))
+            new_eid, name, quality = self.world.update_identity(eid, det.face_embedding)
+            if name and quality == "known":
+                if eid in self._pending_births:  # keep the greet pending under the merged id
+                    self._pending_births[new_eid] = self._pending_births.pop(eid)
+                if not self.world.db.execute(
+                    "SELECT 1 FROM trace WHERE kind='identified' AND payload LIKE ? "
+                    "AND ts > ?", (f"%{new_eid}%", time.time() - 300)).fetchone():
+                    self.world.trace("-", "identified", {"entity": new_eid, "name": name})
+                    self.bus.publish_json("lucas/debug/thought", {
+                        "kind": "note", "text": f"face recognized: {name}"})
+
+    def _drain_births(self) -> None:
+        """Submit greeting deliberations once identity arrives or the wait expires."""
+        now = time.time()
+        for eid, deadline in list(self._pending_births.items()):
+            info = self.world.present.get(eid)
+            if info is None:
+                self._pending_births.pop(eid, None)
+                continue
+            name = info.get("name")
+            if not name and now < deadline:
+                continue
+            self._pending_births.pop(eid, None)
+            who = name or "someone new"
+            self.world.add_event(
+                "person_entered", f"{who} came into view",
+                [eid], config.get("node_a.salience.person_priority", 0.7))
+            d = Deliberation(
+                event_type="person_enters",
+                trigger_desc=f"{who} just came into view"
+                + ("" if name else " (Lucas doesn't recognize them)"),
+                tier=Tier.COMPETE,
+                priority=config.get("node_a.salience.person_priority", 0.7),
+                entity_ids=[eid],
+            )
+            self._pending_person[info["track_id"]] = d.id
+            self.submit(d)
 
     def on_transcript(self, tr: Transcript) -> None:
         self.world.conversation.append({"role": "user", "text": tr.text, "ts": tr.ts})
@@ -146,6 +188,7 @@ class Orchestrator:
 
     def run(self) -> None:
         self.bus.subscribe("lucas/vision/tier0", DetectionFrame, self.on_tier0)
+        self.bus.subscribe("lucas/vision/rich", DetectionFrame, self.on_rich)
         self.bus.subscribe("lucas/audio/transcript", Transcript, self.on_transcript)
         self.bus.subscribe("lucas/audio/sound", SoundEvent, self.on_sound)
         self.bus.start()
@@ -153,6 +196,7 @@ class Orchestrator:
                  len(self.world.facts_for_prompt(99)))
         period = 1.0 / float(config.get("node_a.scheduler_hz", 20))
         while True:
+            self._drain_births()
             d = None
             with self._lock:
                 if self._queue:

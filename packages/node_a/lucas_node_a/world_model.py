@@ -107,6 +107,36 @@ class WorldModel:
         }
         return eid, name, identity, reappeared
 
+    def update_identity(self, entity_id: str, embedding: list[float]
+                        ) -> tuple[str, Optional[str], str]:
+        """Resolve a live entity's identity from a face embedding.
+
+        -> (entity_id_after_merge, name|None, known|uncertain|unknown).
+        If the embedding matches an enrolled person, the temporary entity is
+        merged into the known one (presence + track transfer)."""
+        info = self.present.get(entity_id)
+        if info is None:
+            return entity_id, None, "unknown"
+        if info.get("name"):
+            return entity_id, info["name"], "known"
+        match = self.match_face(embedding)
+        if match is None:
+            return entity_id, None, "unknown"
+        known_eid, name, quality = match
+        if quality != "known":
+            return entity_id, None, quality
+        if known_eid != entity_id:  # merge temp entity into the enrolled one
+            self.present.pop(entity_id, None)
+            self.present[known_eid] = {**info, "name": name}
+            with self.db:
+                self.db.execute("UPDATE entities SET present=0 WHERE id=?", (entity_id,))
+                self.db.execute(
+                    "UPDATE entities SET present=1, track_id=?, last_seen=? WHERE id=?",
+                    (info["track_id"], time.time(), known_eid))
+        else:
+            info["name"] = name
+        return known_eid, name, "known"
+
     def person_left(self, track_id: str) -> Optional[str]:
         for eid, info in list(self.present.items()):
             if info["track_id"] == track_id:
@@ -146,9 +176,11 @@ class WorldModel:
         eid = new_id()
         vec = np.asarray(embedding, dtype=np.float32).tobytes()
         with self.db:
+            # last_seen=0: enrollment must never trigger the reappearance
+            # shortcut — identity comes from the face match, not a timestamp
             self.db.execute(
                 "INSERT INTO entities(id, kind, name, first_seen, last_seen)"
-                " VALUES(?, 'person', ?, ?, ?)", (eid, name, time.time(), time.time()))
+                " VALUES(?, 'person', ?, ?, 0)", (eid, name, time.time()))
             self.db.execute(
                 "INSERT INTO known_faces(entity_id, name, embedding) VALUES(?,?,?)",
                 (eid, name, vec))
