@@ -138,3 +138,17 @@ def test_camera_section_only_when_image_attached():
     assert "CAMERA:" in prompts.build_think_user(req)
     req2 = ThinkRequest(deliberation_id="d3", scene="A room.", event="idle check")
     assert "CAMERA:" not in prompts.build_think_user(req2)
+
+
+def test_scene_summarizes_own_speech_keeps_others_verbatim(tmp_path):
+    """Lucas's own words never appear verbatim in the scene (self-echo guard);
+    other people's words do."""
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.deliberation import serialize_scene
+    w = WorldModel(str(tmp_path / "w.db"))
+    w.add_event("user_said", 'someone said: "I love jasmine tea"', [], 0.8)
+    w.add_event("lucas_said", 'Lucas said: "A very unique phrase xyzzy"', [], 0.4)
+    scene = serialize_scene(w)
+    assert "jasmine tea" in scene            # others verbatim
+    assert "xyzzy" not in scene              # own words summarized
+    assert "Lucas spoke to them" in scene

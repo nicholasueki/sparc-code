@@ -167,9 +167,10 @@ class WorldModel:
         self.db.commit()
         return eid
 
-    def recent_events(self, k: int = 5) -> list[tuple[float, str]]:
+    def recent_events(self, k: int = 5) -> list[tuple[float, str, str]]:
+        """-> [(ts, type, description)] oldest-first."""
         return self.db.execute(
-            "SELECT ts, description FROM events ORDER BY ts DESC LIMIT ?", (k,)
+            "SELECT ts, type, description FROM events ORDER BY ts DESC LIMIT ?", (k,)
         ).fetchall()[::-1]
 
     # ------------------------------------------------------------- facts

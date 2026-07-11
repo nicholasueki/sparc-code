@@ -64,9 +64,24 @@ def serialize_scene(world) -> str:
     recent = world.recent_events(3)
     if recent:
         bits.append(
-            "Recently: " + "; ".join(f"{d} ({narrative.ago(ts)})" for ts, d in recent) + "."
+            "Recently: "
+            + "; ".join(f"{_render_event(t, d)} ({narrative.ago(ts)})"
+                        for ts, t, d in recent)
+            + "."
         )
     return " ".join(bits)
+
+
+def _render_event(type_: str, description: str) -> str:
+    """Lucas's OWN utterances are summarized, never quoted, in the scene prose.
+
+    Verbatim self-quotes proved to be a feedback loop: anything Lucas once said
+    (including mistakes) reappears in 'Recently:' and gets pattern-matched into
+    new replies. Others' words stay verbatim — they're context, not a template.
+    The database keeps full text either way (transcripts, search, distillation)."""
+    if type_ == "lucas_said":
+        return "Lucas spoke to them"
+    return description
 
 
 # -------------------------------------------------------------- validator
