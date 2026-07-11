@@ -200,7 +200,7 @@ def test_enroll_face_validation_and_commit(tmp_path):
     ok, _ = validate(w, d, Action(kind="enroll_face", args={"name": "x9!!"}))
     assert not ok                                           # implausible name
 
-    w.present[eid]["embs"] = [[1.0] + [0.0] * 511] * 4      # stable samples
+    for _ in range(4): w.buffer_face(eid, [1.0] + [0.0] * 511)  # stable samples
     ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "Maya"}))
     assert ok, why
     assert w.enroll_present(eid, "Maya") == eid
@@ -233,3 +233,27 @@ def test_recent_notable_excludes_presence_churn(tmp_path):
     assert any("hello there" in d for d in descs)
     assert not any("left Lucas" in d for d in descs)      # presence churn gone
     assert not any("came into view" in d for d in descs)
+
+
+def test_scene_states_face_not_saved_for_unknown(tmp_path):
+    """Scene must tell the model the truth: unknown person's face isn't saved."""
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.deliberation import serialize_scene
+    w = WorldModel(str(tmp_path / "w.db"))
+    eid, *_ = w.person_appeared("trk_z")
+    scene = serialize_scene(w)
+    assert "NOT saved this person's face" in scene
+    assert "clear look" in scene            # no samples yet
+    for _ in range(3):
+        w.buffer_face(eid, [1.0] + [0.0] * 511)
+    assert "can save their face now" in serialize_scene(w)
+
+
+def test_face_buffer_survives_presence_churn(tmp_path):
+    from lucas_node_a.world_model import WorldModel
+    w = WorldModel(str(tmp_path / "w.db"))
+    eid, *_ = w.person_appeared("trk_a")
+    for _ in range(4):
+        w.buffer_face(eid, [1.0] + [0.0] * 511)
+    w.person_left("trk_a")                  # churn: left view
+    assert len(w.face_samples(eid)) == 4    # buffer survived

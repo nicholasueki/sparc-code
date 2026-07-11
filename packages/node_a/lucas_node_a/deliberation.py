@@ -59,6 +59,17 @@ def serialize_scene(world) -> str:
             attend = ", looking at Lucas" if info.get("attending", 0) > 0.5 else ""
             people.append(f"{who} is here (came in {narrative.ago(info['since'])}{attend})")
         bits.append(" ".join(people) + ".")
+        # ground truth about face memory — prevents false "I remember your face"
+        # claims and signals when enrollment is possible (design: code owns reality).
+        unknown = [i for i in world.present.values() if not i.get("name")]
+        if len(unknown) == 1 and len(world.present) == 1:
+            has_face = len(world.face_samples(
+                next(e for e, i in world.present.items() if not i.get("name")))) >= 3
+            bits.append(
+                "Lucas has NOT saved this person's face and does not know who they are. "
+                + ("If they tell Lucas their name, Lucas can save their face now."
+                   if has_face
+                   else "Lucas cannot get a clear look at their face yet."))
     else:
         bits.append("Nobody is in view right now.")
     recent = world.recent_notable_events(3)
@@ -116,7 +127,7 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
         unknowns = [e for e, i in world.present.items() if not i.get("name")]
         if len(world.present) != 1 or len(unknowns) != 1:
             return False, "enroll_face: need exactly one unknown person present"
-        if len(world.present[unknowns[0]].get("embs", [])) < 3:
+        if len(world.face_samples(unknowns[0])) < 3:
             return False, "enroll_face: not enough face samples yet"
     if action.kind == "set_reminder":
         if not (action.args or {}).get("text"):

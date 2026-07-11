@@ -102,10 +102,8 @@ class Orchestrator:
             if len(self.world.present) != 1:
                 return  # MVP: only resolve identity when unambiguous (v0.5: association)
             eid = next(iter(self.world.present))
-            # rolling buffer for seamless enrollment (enroll_face action)
-            embs = self.world.present[eid].setdefault("embs", [])
-            embs.append(det.face_embedding)
-            del embs[:-10]
+            # churn-proof rolling buffer for seamless enrollment (enroll_face action)
+            self.world.buffer_face(eid, det.face_embedding)
             new_eid, name, quality = self.world.update_identity(eid, det.face_embedding)
             if name and quality == "known":
                 if eid in self._pending_births:  # keep the greet pending under the merged id
@@ -382,6 +380,13 @@ class Orchestrator:
                     {"role": "lucas", "text": ack, "ts": time.time()})
                 log.info("LUCAS ENROLLED FACE: %s (%s)", name, eid)
             else:
+                # outcome truth: a silent failure would let Lucas later claim success
+                self.world.add_event(
+                    "enroll_failed",
+                    f"Lucas tried to save {name}'s face but couldn't get a clear "
+                    f"enough look — it was not saved", d.entity_ids, 0.6)
+                self.bus.publish("lucas/tts/say", SpeakRequest(
+                    text=f"Sorry {name}, I couldn't get a clear look — can you face me for a second?"))
                 log.warning("enroll_face failed post-validation (samples inconsistent)")
         elif action.kind == "set_reminder":
             self.world.add_event("reminder_set",

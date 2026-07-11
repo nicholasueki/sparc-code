@@ -52,7 +52,19 @@ class WorldModel:
         self.present: dict[str, dict] = {}  # entity_id -> {name, track_id, since, attending}
         self.conversation: list[dict] = []  # [{role, text, ts}]
         self.last_action_ts: dict[str, float] = {}  # cooldown ledger
+        # face embeddings buffered per entity, SURVIVES presence churn so a
+        # flapping tracker can't wipe enrollment samples (entity_id -> [emb,...])
+        self.face_buffer: dict[str, list] = {}
         self._rebuild_hot()
+
+    def buffer_face(self, entity_id: str, embedding: list[float], cap: int = 12) -> int:
+        buf = self.face_buffer.setdefault(entity_id, [])
+        buf.append(embedding)
+        del buf[:-cap]
+        return len(buf)
+
+    def face_samples(self, entity_id: str) -> list[list[float]]:
+        return self.face_buffer.get(entity_id, [])
 
     def _rebuild_hot(self) -> None:
         for eid, name, track_id, last_seen in self.db.execute(
@@ -112,7 +124,7 @@ class WorldModel:
         embedding buffer the enrichment loop has been filling. Deterministic;
         called only after the validator approves an enroll_face action."""
         info = self.present.get(entity_id)
-        embs = (info or {}).get("embs", [])
+        embs = self.face_samples(entity_id)
         if info is None or len(embs) < 3:
             return None
         emb = np.mean(np.asarray(embs, dtype=np.float32), axis=0)
