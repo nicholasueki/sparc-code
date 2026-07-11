@@ -229,6 +229,27 @@ class WorldModel:
             "SELECT ts, type, description FROM events ORDER BY ts DESC LIMIT ?", (k,)
         ).fetchall()[::-1]
 
+    # events that just track presence — the "Present:" line already conveys this,
+    # so they're clutter (and anonymous "they") in the scene's Recently list.
+    _PRESENCE_TYPES = ("person_entered", "person_left")
+
+    def recent_notable_events(self, k: int = 3) -> list[tuple[float, str, str]]:
+        """Notable = non-presence events, consecutive duplicates collapsed. Oldest-first."""
+        rows = self.db.execute(
+            "SELECT ts, type, description FROM events "
+            f"WHERE type NOT IN ({','.join('?' * len(self._PRESENCE_TYPES))}) "
+            "ORDER BY ts DESC LIMIT ?", (*self._PRESENCE_TYPES, k * 4)).fetchall()
+        out: list[tuple[float, str, str]] = []
+        last_desc = None
+        for ts, t, d in rows:  # newest first
+            if d == last_desc:
+                continue
+            last_desc = d
+            out.append((ts, t, d))
+            if len(out) >= k:
+                break
+        return out[::-1]
+
     # ------------------------------------------------------------- facts
 
     def commit_fact(self, statement: str, source: str, confidence: float = 0.7,

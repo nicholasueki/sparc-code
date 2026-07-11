@@ -209,3 +209,27 @@ def test_enroll_face_validation_and_commit(tmp_path):
     # second enrollment of the same name gets vetoed
     ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "maya"}))
     assert not ok and "already enrolled" in why
+
+
+def test_storable_fact_rejects_nonfacts():
+    from lucas_node_a.orchestrator import _is_storable_fact
+    assert _is_storable_fact("that I like jasmine tea")
+    assert _is_storable_fact("my name is Nicholas")
+    assert not _is_storable_fact("my face")          # enrollment intent
+    assert not _is_storable_fact("my face?")
+    assert not _is_storable_fact("do you know me?")  # question
+    assert not _is_storable_fact("what I look like")
+
+
+def test_recent_notable_excludes_presence_churn(tmp_path):
+    from lucas_node_a.world_model import WorldModel
+    w = WorldModel(str(tmp_path / "w.db"))
+    w.add_event("person_entered", "someone new came into view", [], 0.7)
+    w.add_event("person_left", "they left Lucas's view", [], 0.3)
+    w.add_event("person_left", "they left Lucas's view", [], 0.3)  # dup
+    w.add_event("user_said", 'someone said: "hello there"', [], 0.8)
+    notable = w.recent_notable_events(3)
+    descs = [d for _, _, d in notable]
+    assert any("hello there" in d for d in descs)
+    assert not any("left Lucas" in d for d in descs)      # presence churn gone
+    assert not any("came into view" in d for d in descs)

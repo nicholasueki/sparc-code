@@ -35,6 +35,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s
 log = logging.getLogger("lucas.orchestrator")
 
 
+def _is_storable_fact(text: str) -> bool:
+    """Guard the deterministic remember rule against non-facts:
+    'remember my face' is an ENROLLMENT request (enroll_face handles it), and
+    questions / garbled STT fragments must never become durable facts."""
+    low = text.strip().lower()
+    if low.endswith("?"):
+        return False
+    first = low.split()[0] if low.split() else ""
+    if first in ("do", "did", "can", "could", "will", "would", "are", "is", "does", "who"):
+        return False
+    # enrollment / appearance intents are not facts
+    if any(p in low for p in ("my face", "who i am", "what i look like", "my appearance")):
+        return False
+    return True
+
+
 class Orchestrator:
     def __init__(self) -> None:
         self.world = WorldModel(config.get("node_a.db_path"))
@@ -136,7 +152,7 @@ class Orchestrator:
         import re as _re
 
         m = _re.search(r"\bremember\b[,:]?\s*(?:that\s+)?(.+)", tr.text, _re.IGNORECASE)
-        if m and len(m.group(1)) > 3:
+        if m and len(m.group(1)) > 3 and _is_storable_fact(m.group(1)):
             stmt = m.group(1).strip().rstrip(".!")
             self._commit_fact(stmt, source="user_told", confidence=0.9)
             log.info("DETERMINISTIC REMEMBER: %s", stmt)

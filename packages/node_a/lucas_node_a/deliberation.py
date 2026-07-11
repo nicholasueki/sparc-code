@@ -61,7 +61,7 @@ def serialize_scene(world) -> str:
         bits.append(" ".join(people) + ".")
     else:
         bits.append("Nobody is in view right now.")
-    recent = world.recent_events(3)
+    recent = world.recent_notable_events(3)
     if recent:
         bits.append(
             "Recently: "
