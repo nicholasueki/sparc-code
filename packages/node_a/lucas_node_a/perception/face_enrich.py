@@ -73,9 +73,11 @@ def _maybe_sigmoid(x: np.ndarray) -> np.ndarray:
     return x
 
 
-def decode_scrfd(outs: dict, conf_t: float) -> tuple[np.ndarray, np.ndarray, float] | None:
-    """-> (bbox_xyxy[4], landmarks[5,2], score) for the best face, in 640-space."""
-    best = None
+def decode_scrfd(outs: dict, conf_t: float, max_faces: int = 4
+                 ) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    """-> [(bbox_xyxy[4], landmarks[5,2], score)] for ALL faces >= conf_t,
+    NMS-deduplicated, best-first, in 640-canvas space."""
+    cands: list[tuple[np.ndarray, np.ndarray, float]] = []
     for stride, (s_name, b_name, k_name) in SCRFD_BRANCHES.items():
         h = w = IN_SIZE // stride
         scores = _maybe_sigmoid(outs[s_name].reshape(-1))          # (h*w*2,)
@@ -84,16 +86,43 @@ def decode_scrfd(outs: dict, conf_t: float) -> tuple[np.ndarray, np.ndarray, flo
         ys, xs = np.mgrid[:h, :w]
         centers = np.stack([xs, ys], axis=-1).reshape(-1, 2) * stride
         centers = np.repeat(centers, 2, axis=0).astype(np.float32)  # 2 anchors
-        idx = int(np.argmax(scores))
-        if best is None or scores[idx] > best[2]:
+        for idx in np.nonzero(scores >= conf_t)[0]:
             cx, cy = centers[idx]
-            x1, y1 = cx - bbox[idx, 0], cy - bbox[idx, 1]
-            x2, y2 = cx + bbox[idx, 2], cy + bbox[idx, 3]
+            box = np.array([cx - bbox[idx, 0], cy - bbox[idx, 1],
+                            cx + bbox[idx, 2], cy + bbox[idx, 3]])
             lm = (centers[idx][None, :] + kps[idx].reshape(5, 2)).astype(np.float32)
-            best = (np.array([x1, y1, x2, y2]), lm, float(scores[idx]))
-    if best is None or best[2] < conf_t:
+            cands.append((box, lm, float(scores[idx])))
+    cands.sort(key=lambda c: -c[2])
+    kept: list[tuple[np.ndarray, np.ndarray, float]] = []
+    for box, lm, sc in cands:
+        if all(_box_iou(box, k[0]) < 0.4 for k in kept):
+            kept.append((box, lm, sc))
+        if len(kept) >= max_faces:
+            break
+    return kept
+
+
+def _box_iou(a: np.ndarray, b: np.ndarray) -> float:
+    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
+    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    area = ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+    return inter / area if area > 0 else 0.0
+
+
+def match_face_to_track(face_center_norm: tuple[float, float],
+                        track_boxes: dict[str, tuple]) -> str | None:
+    """Attribute a face to the person box containing its center; if several
+    contain it (people overlapping), pick the smallest box (nearest person)."""
+    cx, cy = face_center_norm
+    containing = [
+        (tid, (b[2] - b[0]) * (b[3] - b[1]))
+        for tid, b in track_boxes.items()
+        if b[0] <= cx <= b[2] and b[1] <= cy <= b[3]
+    ]
+    if not containing:
         return None
-    return best
+    return min(containing, key=lambda t: t[1])[0]
 
 
 def align_face(frame_bgr: np.ndarray, landmarks: np.ndarray, scale: float) -> np.ndarray:
@@ -106,23 +135,23 @@ def align_face(frame_bgr: np.ndarray, landmarks: np.ndarray, scale: float) -> np
     return cv2.warpAffine(frame_bgr, M, (112, 112), borderValue=0)
 
 
-class PresenceMirror:
-    """Tracks whether anyone is in view by mirroring the tier0 topic."""
+class BoxMirror:
+    """Mirrors tier0 to know WHO is in view and WHERE (track_id -> bbox)."""
 
     def __init__(self, bus: Bus):
-        self.tracks: set[str] = set()
+        self.boxes: dict[str, tuple] = {}
         bus.subscribe("lucas/vision/tier0", DetectionFrame, self._on_frame)
 
     def _on_frame(self, f: DetectionFrame) -> None:
         for d in f.detections:
-            if f.scene_delta == "new_track":
-                self.tracks.add(d.track_id)
-            elif f.scene_delta == "lost_track":
-                self.tracks.discard(d.track_id)
+            if f.scene_delta == "lost_track":
+                self.boxes.pop(d.track_id, None)
+            else:  # new_track or periodic refresh
+                self.boxes[d.track_id] = d.bbox
 
     @property
     def anyone(self) -> bool:
-        return bool(self.tracks)
+        return bool(self.boxes)
 
 
 def main() -> None:
@@ -148,12 +177,12 @@ def main() -> None:
     log.info("hailo-8 face pipeline resident (scrfd + arcface, round-robin)")
 
     bus = Bus(client_id="face-enrich")
-    presence = PresenceMirror(bus)
+    mirror = BoxMirror(bus)
     bus.start()
     http = httpx.Client(timeout=3)
 
     while True:
-        if not presence.anyone:
+        if not mirror.anyone:
             time.sleep(0.25)
             continue
         t0 = time.time()
@@ -169,27 +198,32 @@ def main() -> None:
             canvas = np.zeros((IN_SIZE, IN_SIZE, 3), np.uint8)
             canvas[: resized.shape[0], : resized.shape[1]] = resized
 
-            det = decode_scrfd(scrfd.run(canvas), conf_t)
-            if det is None:
-                time.sleep(1.0 / hz)
-                continue
-            box, lm, score = det
-            aligned = align_face(frame, lm, scale)
-            emb = arcface.run(aligned)["arcface_mobilefacenet/fc1"].reshape(-1)
-            emb = emb / (np.linalg.norm(emb) + 1e-9)
-
-            nb = (box / IN_SIZE).clip(0, 1)
-            bus.publish("lucas/vision/rich", DetectionFrame(
-                source="hailo8",
-                scene_delta="periodic",
-                detections=[Detection(
-                    track_id=next(iter(presence.tracks), "unknown"),
-                    cls="face", conf=score,
-                    bbox=(float(nb[0]), float(nb[1]), float(nb[2]), float(nb[3])),
+            faces = decode_scrfd(scrfd.run(canvas), conf_t)
+            track_boxes = dict(mirror.boxes)  # snapshot
+            dets: list[Detection] = []
+            for box, lm, score in faces:
+                # face center in frame-normalized coords = person-box space
+                fcx = (box[0] + box[2]) / 2 / scale / fw
+                fcy = (box[1] + box[3]) / 2 / scale / fh
+                tid = match_face_to_track((fcx, fcy), track_boxes)
+                if tid is None and len(track_boxes) == 1:
+                    tid = next(iter(track_boxes))  # single person: trivially theirs
+                if tid is None:
+                    continue  # face with no owner (box lag) — skip, next tick
+                aligned = align_face(frame, lm, scale)
+                emb = arcface.run(aligned)["arcface_mobilefacenet/fc1"].reshape(-1)
+                emb = emb / (np.linalg.norm(emb) + 1e-9)
+                dets.append(Detection(
+                    track_id=tid, cls="face", conf=score,
+                    bbox=(float(fcx), float(fcy), float(fcx), float(fcy)),
                     face_embedding=[float(x) for x in emb],
-                )]))
-            log.info("face embedded (det %.2f, %.0f ms)", score,
-                     (time.time() - t0) * 1000)
+                ))
+            if dets:
+                bus.publish("lucas/vision/rich", DetectionFrame(
+                    source="hailo8", scene_delta="periodic", detections=dets))
+                log.info("embedded %d face(s) -> %s (%.0f ms)",
+                         len(dets), [d.track_id[:6] for d in dets],
+                         (time.time() - t0) * 1000)
         except Exception:
             log.exception("enrich tick failed")
         time.sleep(max(0.0, 1.0 / hz - (time.time() - t0)))

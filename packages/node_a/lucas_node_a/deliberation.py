@@ -61,15 +61,19 @@ def serialize_scene(world) -> str:
         bits.append(" ".join(people) + ".")
         # ground truth about face memory — prevents false "I remember your face"
         # claims and signals when enrollment is possible (design: code owns reality).
-        unknown = [i for i in world.present.values() if not i.get("name")]
-        if len(unknown) == 1 and len(world.present) == 1:
-            has_face = len(world.face_samples(
-                next(e for e, i in world.present.items() if not i.get("name")))) >= 3
+        unknown_ids = [e for e, i in world.present.items() if not i.get("name")]
+        if len(unknown_ids) == 1:
+            has_face = len(world.face_samples(unknown_ids[0])) >= 3
             bits.append(
-                "Lucas has NOT saved this person's face and does not know who they are. "
+                "Lucas has NOT saved the unrecognized person's face. "
                 + ("If they tell Lucas their name, Lucas can save their face now."
                    if has_face
                    else "Lucas cannot get a clear look at their face yet."))
+        elif len(unknown_ids) > 1:
+            bits.append(
+                f"There are {len(unknown_ids)} people here Lucas doesn't recognize; "
+                "Lucas can only save one new face at a time, when it's clear whose "
+                "name was given.")
     else:
         bits.append("Nobody is in view right now.")
     recent = world.recent_notable_events(3)
@@ -125,8 +129,11 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
         if name.lower() in (n.lower() for n in world.known_names()):
             return False, f"enroll_face: {name} already enrolled"
         unknowns = [e for e, i in world.present.items() if not i.get("name")]
-        if len(world.present) != 1 or len(unknowns) != 1:
-            return False, "enroll_face: need exactly one unknown person present"
+        # v0.5: known people may be present; the NAME just needs an unambiguous owner
+        if len(unknowns) == 0:
+            return False, "enroll_face: nobody unrecognized is present"
+        if len(unknowns) > 1:
+            return False, "enroll_face: two unrecognized people here — unclear whose name"
         if len(world.face_samples(unknowns[0])) < 3:
             return False, "enroll_face: not enough face samples yet"
     if action.kind == "set_reminder":

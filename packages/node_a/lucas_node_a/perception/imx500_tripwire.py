@@ -209,6 +209,7 @@ def main() -> None:
     camera_config = picam2.create_preview_configuration(
         main={"size": (640, 480)}, buffer_count=6)
     picam2.start(camera_config)
+    last_periodic = 0.0
     log.info("IMX500 tripwire live (model=%s)", cfg["model"])
 
     while True:
@@ -230,6 +231,16 @@ def main() -> None:
 
         conf_by_box = dict(zip(boxes, confs))
         current, new_ids, lost_ids = tracker.update(boxes)
+        # periodic box refresh (~1 Hz) so downstream consumers (face_enrich)
+        # can associate faces to the right person when several are in view
+        now = time.time()
+        if current and now - last_periodic >= 1.0:
+            last_periodic = now
+            bus.publish("lucas/vision/tier0", DetectionFrame(
+                source="imx500", scene_delta="periodic",
+                detections=[Detection(track_id=tid, cls="person",
+                                      conf=conf_by_box.get(box, 0.8), bbox=box)
+                            for tid, box in current]))
         if new_ids:
             dets = [
                 Detection(track_id=tid, cls="person",

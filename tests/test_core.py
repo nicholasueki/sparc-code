@@ -177,11 +177,11 @@ def test_scrfd_decode_shapes():
         outs[s] = np.full((h, h, 2), -8.0, np.float32)   # logits ~ 0 prob
         outs[b] = np.ones((h, h, 8), np.float32)
         outs[k] = np.ones((h, h, 20), np.float32)
-    assert decode_scrfd(outs, conf_t=0.5) is None        # nothing confident
+    assert decode_scrfd(outs, conf_t=0.5) == []         # nothing confident
     outs[SCRFD_BRANCHES[16][0]][10, 10, 0] = 8.0          # one hot face
-    det = decode_scrfd(outs, conf_t=0.5)
-    assert det is not None
-    box, lm, score = det
+    dets = decode_scrfd(outs, conf_t=0.5)
+    assert len(dets) == 1
+    box, lm, score = dets[0]
     assert score > 0.99 and lm.shape == (5, 2)
     assert box[0] < box[2] and box[1] < box[3]
 
@@ -242,7 +242,7 @@ def test_scene_states_face_not_saved_for_unknown(tmp_path):
     w = WorldModel(str(tmp_path / "w.db"))
     eid, *_ = w.person_appeared("trk_z")
     scene = serialize_scene(w)
-    assert "NOT saved this person's face" in scene
+    assert "NOT saved the unrecognized person's face" in scene
     assert "clear look" in scene            # no samples yet
     for _ in range(3):
         w.buffer_face(eid, [1.0] + [0.0] * 511)
@@ -257,3 +257,35 @@ def test_face_buffer_survives_presence_churn(tmp_path):
         w.buffer_face(eid, [1.0] + [0.0] * 511)
     w.person_left("trk_a")                  # churn: left view
     assert len(w.face_samples(eid)) == 4    # buffer survived
+
+
+def test_face_track_association():
+    from lucas_node_a.perception.face_enrich import match_face_to_track
+    boxes = {"near": (0.4, 0.2, 0.7, 0.95), "far": (0.35, 0.3, 0.8, 1.0),
+             "other": (0.0, 0.1, 0.25, 0.9)}
+    # face center inside both 'near' and 'far' -> smallest box wins
+    assert match_face_to_track((0.55, 0.4), boxes) == "near"
+    assert match_face_to_track((0.1, 0.5), boxes) == "other"
+    assert match_face_to_track((0.95, 0.5), boxes) is None  # nobody there
+
+
+def test_enroll_allowed_with_known_person_present(tmp_path):
+    """v0.5: enrolling the one unknown works even while a known person is in view."""
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.deliberation import Deliberation, validate
+    from lucas_common.types import Action
+    w = WorldModel(str(tmp_path / "w.db"))
+    w.enroll_face("Nicholas", [1.0] + [0.0] * 511)
+    # Nicholas present (known) + one stranger
+    nid, *_ = w.person_appeared("trk_nick", [1.0] + [0.0] * 511)
+    sid, name, *_ = w.person_appeared("trk_parent")
+    assert w.present[nid]["name"] == "Nicholas" and name is None
+    for _ in range(4):
+        w.buffer_face(sid, [0.0, 1.0] + [0.0] * 510)
+    d = Deliberation(event_type="person_speaks", trigger_desc="x", entity_ids=[sid])
+    ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "Luciana"}))
+    assert ok, why
+    # two unknowns -> ambiguous -> veto
+    w.person_appeared("trk_stranger2")
+    ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "Bob"}))
+    assert not ok and "unclear" in why

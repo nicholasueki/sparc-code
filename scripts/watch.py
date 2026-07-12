@@ -57,6 +57,8 @@ def on_message(client, userdata, msg):
     t = msg.topic
     if t == "lucas/vision/tier0":
         delta = data.get("scene_delta")
+        if delta == "periodic":
+            return  # 1 Hz box refresh for face association — not an event
         n = len(data.get("detections", []))
         icon = {"new_track": "appeared", "lost_track": "left view"}.get(delta, delta)
         line("cyan", "VISION", f"person {icon} ({n} det, src={data.get('source')})")

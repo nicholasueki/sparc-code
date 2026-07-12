@@ -57,6 +57,12 @@ class WorldModel:
         self.face_buffer: dict[str, list] = {}
         self._rebuild_hot()
 
+    def entity_by_track(self, track_id: str) -> Optional[str]:
+        for eid, info in self.present.items():
+            if info.get("track_id") == track_id:
+                return eid
+        return None
+
     def buffer_face(self, entity_id: str, embedding: list[float], cap: int = 12) -> int:
         buf = self.face_buffer.setdefault(entity_id, [])
         buf.append(embedding)

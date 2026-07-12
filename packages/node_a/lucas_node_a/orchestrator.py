@@ -95,13 +95,13 @@ class Orchestrator:
                     self.world.add_event("person_left", "they left Lucas's view", [eid], 0.3)
 
     def on_rich(self, frame: DetectionFrame) -> None:
-        """Face embeddings from the Hailo-8 enrichment loop -> identity."""
+        """Per-person face embeddings from the Hailo-8 (v0.5: track-associated)."""
         for det in frame.detections:
             if det.face_embedding is None:
                 continue
-            if len(self.world.present) != 1:
-                return  # MVP: only resolve identity when unambiguous (v0.5: association)
-            eid = next(iter(self.world.present))
+            eid = self.world.entity_by_track(det.track_id)
+            if eid is None:
+                continue  # track vanished between embed and delivery
             # churn-proof rolling buffer for seamless enrollment (enroll_face action)
             self.world.buffer_face(eid, det.face_embedding)
             new_eid, name, quality = self.world.update_identity(eid, det.face_embedding)
