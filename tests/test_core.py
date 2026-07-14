@@ -132,7 +132,8 @@ def test_person_reappearance_object_permanence(tmp_path):
     assert re1 is False
     w.person_left("trk_a")
     eid2, _, identity, re2 = w.person_appeared("trk_b")  # seconds later, new track id
-    assert re2 is True and eid2 == eid1 and identity == "reappeared"
+    assert re2 is True and eid2 == eid1 and identity == "unknown"
+    assert w.present[eid2]["identity_provenance"] == "timestamp"
 
 
 def test_camera_section_only_when_image_attached():
@@ -431,3 +432,282 @@ def test_enroll_allowed_with_known_person_present(tmp_path):
     w.person_appeared("trk_stranger2")
     ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "Bob"}))
     assert not ok and "unclear" in why
+
+
+def test_fresh_face_evidence_has_conservative_states(tmp_path):
+    """Transition rows: no face, positive, uncertain, and below-threshold."""
+    import math
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.deliberation import serialize_scene
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+
+    anonymous, name, state, _ = w.person_appeared("no-face")
+    assert name is None and state == "unknown"
+    assert w.present[anonymous]["identity_provenance"] == "none"
+    w.person_left("no-face")
+
+    known, name, state, reappeared = w.person_appeared(
+        "positive", [1.0, 0.0, 0.0])
+    assert (known, name, state, reappeared) == (
+        nicholas, "Nicholas", "known", False)
+    assert w.live_name(known) == "Nicholas"
+    w.person_left("positive")
+
+    uncertain_vec = [0.5, math.sqrt(0.75), 0.0]
+    uncertain, name, state, _ = w.person_appeared("uncertain", uncertain_vec)
+    assert uncertain != nicholas and name is None and state == "uncertain"
+    scene = serialize_scene(w)
+    assert "identity Lucas is uncertain about" in scene
+    assert "Nicholas" not in scene
+    w.person_left("uncertain")
+
+    negative, name, state, _ = w.person_appeared("negative", [0.0, 0.0, 1.0])
+    assert negative not in (nicholas, uncertain)
+    assert name is None and state == "unknown"
+
+
+def test_timestamp_reappearance_never_reuses_enrollment(tmp_path):
+    """Transition rows: timestamp continuity is anonymous-only."""
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.deliberation import serialize_scene
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    live_known, *_ = w.person_appeared("known-track", [1.0, 0.0, 0.0])
+    assert live_known == known
+    w.person_left("known-track")
+
+    stranger, name, state, reappeared = w.person_appeared("stranger-track")
+    assert stranger != known
+    assert name is None and state == "unknown" and reappeared is False
+    assert known not in w.present
+    assert "Nicholas" not in serialize_scene(w)
+
+    w.person_left("stranger-track")
+    same_stranger, _, state, reappeared = w.person_appeared("stranger-flap")
+    assert same_stranger == stranger and state == "unknown" and reappeared is True
+
+
+def test_known_confirmation_clears_contradiction_and_no_face_retains_binding(tmp_path):
+    """Transition rows: contradiction clears on confirmation; no-face is inert."""
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+
+    eid, name, state = w.update_identity(known, [0.0, 1.0, 0.0], 0.9)
+    assert eid == known and name is None and state == "uncertain"
+    assert len(w.contradiction_buffer[known]) == 1
+
+    eid, name, state = w.update_identity(known, [1.0, 0.0, 0.0], 0.9)
+    assert (eid, name, state) == (known, "Nicholas", "known")
+    assert known not in w.contradiction_buffer
+    # No update is made when a rich frame contains no face; the confirmed live
+    # binding therefore remains authoritative for this continuous track.
+    assert w.live_name(known) == "Nicholas"
+
+
+def test_two_consistent_other_known_samples_rebind(tmp_path):
+    """Transition row: a different enrollment needs two consistent positives."""
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    maya = w.enroll_face("Maya", [0.0, 1.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+
+    eid, name, state = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+    assert eid == nicholas and name is None and state == "uncertain"
+    assert w.live_name(nicholas) is None
+
+    eid, name, state = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+    assert (eid, name, state) == (maya, "Maya", "known")
+    assert nicholas not in w.present
+    assert w.present[maya]["track_id"] == "trk"
+    assert w.live_name(maya) == "Maya"
+
+
+def test_uncertain_live_known_suppresses_scene_and_named_greeting(tmp_path):
+    """Uncertain evidence retains enrollment but forbids named presentation."""
+    import math
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.deliberation import Deliberation, serialize_scene, validate
+    from lucas_common.types import Action
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+    uncertain_vec = [0.5, math.sqrt(0.75), 0.0]
+    eid, name, state = w.update_identity(known, uncertain_vec, 0.9)
+    assert (eid, name, state) == (known, None, "uncertain")
+    assert "Nicholas" in w.known_names()  # durable enrollment remains
+
+    scene = serialize_scene(w)
+    assert "identity Lucas is uncertain about" in scene
+    assert "Nicholas" not in scene
+    d = Deliberation(
+        event_type="person_enters", trigger_desc="arrival", entity_ids=[known])
+    ok, why = validate(
+        w, d, Action(kind="say", args={"text": "Hi Nicholas!"}))
+    assert not ok and "confirmed live face" in why
+    ok, why = validate(w, d, Action(kind="say", args={"text": "Hi there!"}))
+    assert ok, why
+
+
+def test_three_stable_high_quality_negatives_split_without_corruption(tmp_path):
+    """Three strong negatives move only the live presentation and its evidence."""
+    import json
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+    w.buffer_face(known, [1.0, 0.0, 0.0])
+    old_event = w.add_event("observed", "Nicholas waved", [known], 0.6)
+    w.last_action_ts[f"greet:{known}"] = 123.0
+
+    negative = [0.0, 1.0, 0.0]
+    for _ in range(2):
+        eid, name, state = w.update_identity(known, negative, 0.9)
+        assert eid == known and name is None and state == "uncertain"
+    new_eid, name, state = w.update_identity(known, negative, 0.9)
+
+    assert new_eid != known and name is None and state == "unknown"
+    assert known not in w.present and w.present[new_eid]["track_id"] == "trk"
+    assert w.db.execute(
+        "SELECT name, present FROM entities WHERE id=?", (known,)).fetchone() == (
+            "Nicholas", 0)
+    assert w.db.execute(
+        "SELECT name FROM known_faces WHERE entity_id=?", (known,)).fetchone() == (
+            "Nicholas",)
+    assert len(w.face_samples(new_eid)) == 3
+    assert w.face_samples(known) == [[1.0, 0.0, 0.0]]
+    assert w.last_action_ts[f"greet:{known}"] == 123.0
+
+    old_ids = json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (old_event,)).fetchone()[0])
+    assert old_ids == [known]
+    new_event = w.add_event("observed", "the visitor waved", [new_eid], 0.6)
+    new_ids = json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (new_event,)).fetchone()[0])
+    assert new_ids == [new_eid]
+
+
+def test_negative_split_requires_detection_quality_and_embedding_agreement(tmp_path):
+    """Low-confidence or mutually-inconsistent negatives cannot force a split."""
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0, 0.0])
+
+    for _ in range(4):
+        eid, _, _ = w.update_identity(known, [0.0, 1.0, 0.0, 0.0], 0.2)
+        assert eid == known
+    inconsistent = (
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    )
+    for sample in inconsistent:
+        eid, _, _ = w.update_identity(known, sample, 0.9)
+        assert eid == known
+    assert len(w.contradiction_buffer[known]) == 1
+
+
+def test_identity_transition_trace_records_evidence_and_entities(tmp_path):
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+    w.update_identity(known, [0.0, 1.0, 0.0], 0.9)
+    rows = w.db.execute(
+        "SELECT payload FROM trace WHERE kind='identity_transition' ORDER BY id"
+    ).fetchall()
+    assert rows
+    payloads = [__import__("json").loads(row[0]) for row in rows]
+    assert any(p["transition"] == "confirm" and p["to_entity"] == known
+               and p["evidence_class"] == "known_match" for p in payloads)
+    assert any(p["transition"] == "uncertain" and p["from_entity"] == known
+               and p["evidence_class"] == "strong_negative" for p in payloads)
+
+
+def test_orchestrator_split_schedules_one_unnamed_greeting(tmp_path):
+    """A corrected anonymous arrival is handed to the generic greeting path."""
+    import time
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.orchestrator import Orchestrator
+    from lucas_common.types import Detection, DetectionFrame
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = w
+    o._pending_births = {}
+    o._pending_person = {}
+    submitted = []
+    o.submit = submitted.append
+    frame = DetectionFrame(
+        source="hailo8", scene_delta="periodic",
+        detections=[Detection(
+            track_id="trk", cls="face", conf=0.9,
+            bbox=(0.1, 0.1, 0.2, 0.2),
+            face_embedding=[0.0, 1.0, 0.0])])
+    for _ in range(3):
+        o.on_rich(frame)
+
+    anonymous = w.entity_by_track("trk")
+    assert anonymous != known
+    assert len(w.face_samples(anonymous)) == 3  # split samples, no duplicate append
+    assert anonymous in o._pending_births
+    assert o._pending_births[anonymous] > time.time()
+
+    o._pending_births[anonymous] = 0.0
+    o._drain_births()
+    assert len(submitted) == 1
+    assert "someone new" in submitted[0].trigger_desc
+    assert "Nicholas" not in submitted[0].trigger_desc
+
+
+def test_anonymous_tracker_flap_does_not_schedule_second_greeting(tmp_path):
+    from lucas_node_a.world_model import WorldModel
+    from lucas_node_a.orchestrator import Orchestrator
+    from lucas_common.types import Detection, DetectionFrame
+
+    class FakeBus:
+        def publish_json(self, *_args, **_kwargs):
+            pass
+
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = WorldModel(str(tmp_path / "w.db"))
+    o.bus = FakeBus()
+    o._pending_births = {}
+    o._pending_person = {}
+    box = (0.1, 0.1, 0.2, 0.2)
+    o.on_tier0(DetectionFrame(
+        source="imx500", scene_delta="new_track",
+        detections=[Detection(
+            track_id="first", cls="person", conf=0.9, bbox=box)]))
+    anonymous = o.world.entity_by_track("first")
+    assert anonymous in o._pending_births
+
+    o.world.last_action_ts[f"greet:{anonymous}"] = 123.0
+    o.on_tier0(DetectionFrame(
+        source="imx500", scene_delta="lost_track",
+        detections=[Detection(
+            track_id="first", cls="person", conf=0.0, bbox=box)]))
+    assert o._pending_births == {}
+    o.on_tier0(DetectionFrame(
+        source="imx500", scene_delta="new_track",
+        detections=[Detection(
+            track_id="flap", cls="person", conf=0.9, bbox=box)]))
+
+    assert o.world.entity_by_track("flap") == anonymous
+    assert o._pending_births == {}
+    assert o.world.last_action_ts[f"greet:{anonymous}"] == 123.0

@@ -73,8 +73,7 @@ class Orchestrator:
             if det.cls != "person":
                 continue
             if frame.scene_delta == "new_track":
-                eid, name, identity, reappeared = self.world.person_appeared(det.track_id)
-                who = name or "someone new"
+                eid, _, _, reappeared = self.world.person_appeared(det.track_id)
                 if reappeared:
                     # object permanence: same person, brief tracking gap — no re-greet
                     self.world.trace("-", "reappearance", {"entity": eid})
@@ -103,12 +102,22 @@ class Orchestrator:
             eid = self.world.entity_by_track(det.track_id)
             if eid is None:
                 continue  # track vanished between embed and delivery
-            # churn-proof rolling buffer for seamless enrollment (enroll_face action)
-            self.world.buffer_face(eid, det.face_embedding)
-            new_eid, name, quality = self.world.update_identity(eid, det.face_embedding)
+            new_eid, name, quality = self.world.update_identity(
+                eid, det.face_embedding, det.conf)
+            # Anonymous samples remain available for enrollment.  Known-face
+            # contradictions are buffered separately by the world model so they
+            # cannot contaminate a durable enrollment's sample history.
+            if (not self.world.present.get(new_eid, {}).get("name")
+                    and not (new_eid != eid and quality == "unknown")):
+                self.world.buffer_face(new_eid, det.face_embedding)
+            if new_eid != eid and eid in self._pending_births:
+                self._pending_births[new_eid] = self._pending_births.pop(eid)
+            elif new_eid != eid and quality == "unknown":
+                # A corrected anonymous arrival gets one fresh generic-greeting
+                # opportunity; the validator's global cooldown prevents repeats.
+                wait_s = float(config.get("node_a.face.identity_wait_s", 2.5))
+                self._pending_births[new_eid] = time.time() + wait_s
             if name and quality == "known":
-                if eid in self._pending_births:  # keep the greet pending under the merged id
-                    self._pending_births[new_eid] = self._pending_births.pop(eid)
                 if not self.world.db.execute(
                     "SELECT 1 FROM trace WHERE kind='identified' AND payload LIKE ? "
                     "AND ts > ?", (f"%{new_eid}%", time.time() - 300)).fetchone():
@@ -124,7 +133,7 @@ class Orchestrator:
             if info is None:
                 self._pending_births.pop(eid, None)
                 continue
-            name = info.get("name")
+            name = self.world.live_name(eid)
             if not name and now < deadline:
                 continue
             self._pending_births.pop(eid, None)
@@ -394,7 +403,10 @@ class Orchestrator:
             self.world.conversation.append({"role": "sparc", "text": ack, "ts": time.time()})
         elif action.kind == "enroll_face":
             name = str(action.args.get("name", "")).strip()
-            unknowns = [e for e, i in self.world.present.items() if not i.get("name")]
+            unknowns = [
+                e for e, i in self.world.present.items()
+                if not i.get("name") and i.get("identity_state") == "unknown"
+            ]
             eid = self.world.enroll_present(unknowns[0], name) if unknowns else None
             if eid:
                 self.world.add_event("enrolled", f"SPARC learned {name}'s face",

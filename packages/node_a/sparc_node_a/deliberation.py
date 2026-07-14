@@ -6,6 +6,7 @@ never leaves Node A (INV-3).
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -55,13 +56,20 @@ def serialize_scene(world) -> str:
     if world.present:
         people = []
         for eid, info in world.present.items():
-            who = info["name"] or "someone SPARC doesn't recognize"
+            state = info.get("identity_state", "unknown")
+            if state == "uncertain":
+                who = "someone whose identity SPARC is uncertain about"
+            else:
+                who = world.live_name(eid) or "someone SPARC doesn't recognize"
             attend = ", looking at SPARC" if info.get("attending", 0) > 0.5 else ""
             people.append(f"{who} is here (came in {narrative.ago(info['since'])}{attend})")
         bits.append(" ".join(people) + ".")
         # ground truth about face memory — prevents false "I remember your face"
         # claims and signals when enrollment is possible (design: code owns reality).
-        unknown_ids = [e for e, i in world.present.items() if not i.get("name")]
+        unknown_ids = [
+            e for e, i in world.present.items()
+            if not i.get("name") and i.get("identity_state", "unknown") == "unknown"
+        ]
         if len(unknown_ids) == 1:
             has_face = len(world.face_samples(unknown_ids[0])) >= 3
             bits.append(
@@ -125,6 +133,17 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
             global_cd = config.get("node_a.cooldowns.greet_anyone_s", 60)
             if time.time() - world.last_action_ts.get("greet:*", 0) < global_cd:
                 return False, "global greeting cooldown"
+            # A greeting computed from a now-stale named snapshot may still be
+            # generic, but it may never speak a durable name while live identity
+            # is uncertain or lacks face provenance.
+            low = text.casefold()
+            for eid, info in world.present.items():
+                durable_name = info.get("name")
+                if (durable_name and not world.live_name(eid)
+                        and re.search(
+                            rf"(?<!\w){re.escape(durable_name.casefold())}(?!\w)",
+                            low)):
+                    return False, "named greeting lacks confirmed live face identity"
     if action.kind == "remember":
         if not (action.args or {}).get("statement"):
             return False, "remember without statement"
@@ -134,7 +153,10 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
             return False, "enroll_face: implausible name"
         if name.lower() in (n.lower() for n in world.known_names()):
             return False, f"enroll_face: {name} already enrolled"
-        unknowns = [e for e, i in world.present.items() if not i.get("name")]
+        unknowns = [
+            e for e, i in world.present.items()
+            if not i.get("name") and i.get("identity_state", "unknown") == "unknown"
+        ]
         # v0.5: known people may be present; the NAME just needs an unambiguous owner
         if len(unknowns) == 0:
             return False, "enroll_face: nobody unrecognized is present"
