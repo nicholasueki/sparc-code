@@ -15,28 +15,24 @@ from __future__ import annotations
 
 import base64
 import collections
+import importlib.util
 import logging
-import re
+import os
+import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import httpx
 
 from sparc_common import config
+from sparc_common.bus import Bus
+from sparc_common.health import HealthReporter
 from sparc_common.types import SpeakRequest, Transcript
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("sparc.earsd")
-
-# Wake-name matcher for the interim address gate. Whitespace/dot/hyphen tolerant so
-# STT spellings "SPARC", "S.P.A.R.C", "S P A R C", "S-P-A-R-C" all count as being
-# addressed. The trailing [ck] also accepts "spark": Whisper hears the spoken name
-# as the common word far more often than the callsign spelling, so without it the
-# gate would almost never fire. Cost: literal uses of "spark" ("spark plug") wake
-# him. Drop the `k` alternative here if that proves noisier than the missed wakes.
-# \b anchors keep it out of "sparkle", "sparks", "necessary", "Caesar".
-NAME_RE = re.compile(r"\bs[.\s-]?p[.\s-]?a[.\s-]?r[.\s-]?[ck]\b", re.IGNORECASE)
 
 CFG = config.get("node_c.ears", {})
 GENAID = config.get("endpoints.genaid", "http://robot-genai.local:8700")
@@ -46,6 +42,8 @@ FRAME_MS = 30
 FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000  # 480
 
 _speaking_until = 0.0  # half-duplex gate (epoch)
+_mic_open = False
+_voice_mqtt_ready = False
 
 
 def _muted() -> bool:
@@ -76,7 +74,15 @@ def speaker_loop() -> None:
         finally:
             _speaking_until = time.time() + float(CFG.get("echo_tail_s", 0.7))
 
+    def on_connect(client, userdata, flags, reason_code, properties):
+        global _voice_mqtt_ready
+        if reason_code == 0:
+            client.subscribe("sparc/tts/say", qos=1)
+            _voice_mqtt_ready = True
+
     def on_disconnect(client, *a, **k):
+        global _voice_mqtt_ready
+        _voice_mqtt_ready = False
         log.warning("tts bus disconnected; reconnecting")
         while True:
             try:
@@ -87,9 +93,9 @@ def speaker_loop() -> None:
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="earsd-voice")
     client.on_message = on_message
+    client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.connect(config.get("bus.host"), int(config.get("bus.port", 1883)), keepalive=30)
-    client.subscribe("sparc/tts/say", qos=1)
     client.loop_forever(retry_first_connection=True)
 
 
@@ -173,6 +179,7 @@ def _looks_hallucinated(text: str) -> bool:
 
 
 def mic_loop() -> None:
+    global _mic_open
     import sounddevice as sd
     import webrtcvad
 
@@ -205,42 +212,98 @@ def mic_loop() -> None:
             log.info("dropped (hallucination): %.60r", text)
             return
         # interim wake gate: without openWakeWord, only address-by-name reaches
-        # SPARC — otherwise he answers the TV, music, and passing conversation.
-        # Word-boundary match: a bare substring test would fire inside "sparkle" and
-        # "necessary". Accepts SPARC / SPARK / S.P.A.R.C / S P A R C / S-P-A-R-C.
-        if CFG.get("require_name", True) and not NAME_RE.search(text):
+        # SPARC — otherwise he answers the TV, music, and passing conversation
+        if CFG.get("require_name", True) and "sparc" not in text.lower():
             log.info("dropped (not addressed to SPARC): %.60r", text)
             return
         log.info("HEARD: %r", text)
         publish_transcript(text, conf=0.9)
 
     log.info("ears live: mic -> VAD -> 10H whisper (device=%s)", sd.default.device)
-    with sd.RawInputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",
-                           blocksize=FRAME_SAMPLES) as stream:
-        while True:
-            frame, _ = stream.read(FRAME_SAMPLES)
-            frame = bytes(frame)
-            if _muted():
+    try:
+        with sd.RawInputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",
+                               blocksize=FRAME_SAMPLES) as stream:
+            _mic_open = True
+            while True:
+                frame, _ = stream.read(FRAME_SAMPLES)
+                frame = bytes(frame)
+                if _muted():
+                    if in_speech:
+                        flush()
+                    preroll.clear()
+                    continue
+                is_speech = vad.is_speech(frame, SAMPLE_RATE)
                 if in_speech:
-                    flush()
-                preroll.clear()
-                continue
-            is_speech = vad.is_speech(frame, SAMPLE_RATE)
-            if in_speech:
-                utterance.append(frame)
-                if is_speech:
-                    voiced_frames += 1
-                    silence_frames = 0
+                    utterance.append(frame)
+                    if is_speech:
+                        voiced_frames += 1
+                        silence_frames = 0
+                    else:
+                        silence_frames += 1
+                    if silence_frames >= silence_end_frames or len(utterance) >= max_utt_frames:
+                        flush()
+                elif is_speech:
+                    in_speech = True
+                    utterance = list(preroll) + [frame]
+                    voiced_frames, silence_frames = 1, 0
                 else:
-                    silence_frames += 1
-                if silence_frames >= silence_end_frames or len(utterance) >= max_utt_frames:
-                    flush()
-            elif is_speech:
-                in_speech = True
-                utterance = list(preroll) + [frame]
-                voiced_frames, silence_frames = 1, 0
-            else:
-                preroll.append(frame)
+                    preroll.append(frame)
+    finally:
+        _mic_open = False
+
+
+def health(bus: Bus) -> dict:
+    backend = _resolve_stt_backend()
+    stt_ready = False
+    stt_reason = None
+    if backend == "genaid":
+        try:
+            response = httpx.get(f"{GENAID}/health", timeout=4)
+            response.raise_for_status()
+            stt_ready = bool(response.json().get("stt_loaded"))
+            if not stt_ready:
+                stt_reason = "genaid selected but Whisper is not loaded"
+        except Exception as exc:
+            stt_reason = f"genaid health failed: {type(exc).__name__}: {exc}"
+    elif backend == "mlx_local":
+        mlx_model = CFG.get("mlx_whisper_model", "mlx-community/whisper-base-mlx")
+        stt_ready = (importlib.util.find_spec("mlx_whisper") is not None and
+                     _mlx_model_present(mlx_model))
+        if not stt_ready:
+            stt_reason = "mlx_local selected but its module or model setting is missing"
+    else:
+        stt_reason = f"unsupported STT backend: {backend}"
+
+    details = {
+        "mic_open": _mic_open,
+        "tts_ready": shutil.which("say") is not None,
+        "mqtt_ready": bus.connected and _voice_mqtt_ready,
+        "stt_backend": backend,
+        "stt_ready": stt_ready,
+        "stt_model": (CFG.get("mlx_whisper_model", "mlx-community/whisper-base-mlx")
+                      if backend == "mlx_local"
+                      else config.get("node_b.stt_hef")),
+    }
+    ready = bool(details["mic_open"] and details["tts_ready"] and
+                 details["mqtt_ready"] and details["stt_ready"])
+    missing = [name for name in ("mic_open", "tts_ready", "mqtt_ready", "stt_ready")
+               if not details[name]]
+    reason = None if ready else f"not ready: {', '.join(missing)}"
+    if stt_reason:
+        reason = f"{reason}; {stt_reason}" if reason else stt_reason
+    return {"ready": ready, "details": details, "failure_reason": reason}
+
+
+def _mlx_model_present(model: str) -> bool:
+    """Require provisioned local weights; a configured download name is not ready."""
+    path = Path(model).expanduser()
+    if path.exists():
+        return True
+    if "/" not in model:
+        return False
+    hf_home = Path(os.environ.get("HF_HOME", "~/.cache/huggingface")).expanduser()
+    cached = hf_home / "hub" / f"models--{model.replace('/', '--')}" / "snapshots"
+    return cached.is_dir() and any(cached.iterdir())
 
 
 def _forever(fn, name: str) -> None:
@@ -253,6 +316,9 @@ def _forever(fn, name: str) -> None:
 
 
 def main() -> None:
+    health_bus = Bus(client_id="earsd-health")
+    health_bus.start()
+    HealthReporter(health_bus, "earsd", lambda: health(health_bus)).start()
     threading.Thread(target=_forever, args=(speaker_loop, "voice"),
                      daemon=True, name="voice").start()
     _forever(mic_loop, "ears")

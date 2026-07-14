@@ -18,6 +18,7 @@ import httpx
 
 from sparc_common import config
 from sparc_common.bus import Bus
+from sparc_common.health import HealthReporter
 from sparc_common.types import (
     MOTION_KINDS,
     Action,
@@ -73,6 +74,31 @@ class Orchestrator:
         self._pending_person: dict[str, str] = {}  # track_id -> deliberation id (merge)
         # v0.4: births wait briefly for face identity before greeting (ENRICHED stage)
         self._pending_births: dict[str, float] = {}  # entity_id -> greet deadline
+
+    def health(self) -> dict:
+        try:
+            self.world.db.execute("SELECT 1").fetchone()
+            db_ready = True
+        except Exception:
+            db_ready = False
+        # T6 owns the bounded-session implementation. Until its runtime marker is
+        # present, the v0.3 capability verifier must conservatively reject this
+        # daemon instead of mistaking the legacy rolling prompt window for a session.
+        bounded = bool(getattr(self.world, "bounded_session_runtime", False))
+        details = {
+            "db_ready": db_ready,
+            "mqtt_ready": self.bus.connected,
+            "bounded_session_runtime": bounded,
+        }
+        # Overall service health is profile-neutral. The v0.3 verifier separately
+        # requires bounded_session_runtime; v0.4 only depends on DB + MQTT.
+        ready = bool(db_ready and self.bus.connected)
+        missing = [name for name in ("db_ready", "mqtt_ready") if not details[name]]
+        return {
+            "ready": ready,
+            "details": details,
+            "failure_reason": None if ready else f"not ready: {', '.join(missing)}",
+        }
 
     # ------------------------------------------------------------ ingest
 
@@ -228,6 +254,7 @@ class Orchestrator:
         self.bus.subscribe("sparc/audio/transcript", Transcript, self.on_transcript)
         self.bus.subscribe("sparc/audio/sound", SoundEvent, self.on_sound)
         self.bus.start()
+        HealthReporter(self.bus, "orchestrator", self.health).start()
         log.info("orchestrator live; world has %d facts",
                  len(self.world.facts_for_prompt(99)))
         period = 1.0 / float(config.get("node_a.scheduler_hz", 20))

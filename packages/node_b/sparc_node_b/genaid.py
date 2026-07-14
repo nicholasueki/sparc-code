@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from sparc_common import config
+from sparc_common.health import runtime_version
 from sparc_common.types import SalienceDecision, SalienceRequest, SelectorRequest, Selection
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -183,8 +184,14 @@ def stt_endpoint(req: SttRequest) -> dict:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "llm_loaded": llm is not None, "stt_loaded": stt is not None,
-            "hef": str(Path(CFG.get("hef_dir", "")) / CFG.get("llm_hef", ""))}
+    return {
+        "ok": True,
+        "version": runtime_version(),
+        "llm_loaded": llm is not None,
+        "stt_loaded": stt is not None,
+        "llm_hef": str(Path(CFG.get("hef_dir", "")) / CFG.get("llm_hef", "")),
+        "stt_hef": str(Path(CFG.get("hef_dir", "")) / CFG.get("stt_hef", "")),
+    }
 
 
 def main() -> None:

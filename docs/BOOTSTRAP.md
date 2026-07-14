@@ -78,7 +78,9 @@ The Node C lock includes MLX VLM and local Whisper libraries, not model weights:
 `scripts/deploy.sh {a|b|c|all}` syncs the checkout and invokes the same bootstrap
 script with the matching lock. It does not install OS packages, download models,
 install services, or run fleet health checks. Use `scripts/install_services.sh`
-only after external platform prerequisites exist.
+only after external platform prerequisites exist, then follow
+[`CAPABILITY_READINESS.md`](CAPABILITY_READINESS.md) for profile verification and
+revision/config/version-pinned evidence.
 
 ## Reproducible lock regeneration
 

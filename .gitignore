@@ -40,6 +40,7 @@ eval-output/
 eval-results/
 reports/generated/
 artifacts/generated/
+evidence/*.jsonl
 
 # External model/runtime assets (documented in docs/BOOTSTRAP.md)
 models/

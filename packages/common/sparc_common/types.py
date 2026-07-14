@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,17 @@ class Msg(BaseModel):
 
     ts: float = Field(default_factory=now)
     msg_id: str = Field(default_factory=new_id)
+
+
+class ServiceHealth(Msg):
+    """Retained functional readiness for one long-running Lucas service."""
+
+    service: Literal["orchestrator", "tripwire", "enrich", "earsd"]
+    status: Literal["starting", "ready", "degraded", "failed", "stopping"]
+    ready: bool
+    version: str
+    details: dict[str, Any] = Field(default_factory=dict)
+    failure_reason: Optional[str] = None
 
 
 # ---------------------------------------------------------------- perception

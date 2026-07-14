@@ -16,9 +16,11 @@ import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from sparc_common import config
 from sparc_common.bus import Bus
+from sparc_common.health import HealthReporter
 from sparc_common.types import Detection, DetectionFrame, new_id
 
 log = logging.getLogger("sparc.imx500")
@@ -207,6 +209,26 @@ def main() -> None:
     camera_config = picam2.create_preview_configuration(
         main={"size": (640, 480)}, buffer_count=6)
     picam2.start(camera_config)
+    def health_probe() -> dict:
+        frame_ready = grabber.request(2.0) is not None
+        details = {
+            "mqtt_ready": bus.connected,
+            "camera_ready": True,
+            "frame_path_ready": frame_ready,
+            "model": cfg["model"],
+            "model_present": Path(cfg["model"]).is_file(),
+        }
+        ready = bool(details["mqtt_ready"] and details["camera_ready"] and
+                     details["frame_path_ready"] and details["model_present"])
+        missing = [name for name in ("mqtt_ready", "camera_ready", "frame_path_ready",
+                                     "model_present") if not details[name]]
+        return {
+            "ready": ready,
+            "details": details,
+            "failure_reason": None if ready else f"not ready: {', '.join(missing)}",
+        }
+
+    HealthReporter(bus, "tripwire", health_probe).start()
     last_periodic = 0.0
     log.info("IMX500 tripwire live (model=%s)", cfg["model"])
 
