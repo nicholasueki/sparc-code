@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from sparc_common import config, narrative
-from sparc_common.types import Action, new_id
+from sparc_common.types import MOTION_KINDS, Action, new_id
 
 
 class Tier(str, Enum):
@@ -103,6 +103,12 @@ def _render_event(type_: str, description: str) -> str:
 
 def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
     """Deterministic re-check against LIVE state (LIM-M2-3). -> (ok, reason)."""
+    if action.kind in MOTION_KINDS:
+        # Fail closed: only the literal YAML boolean true enables motion. Even then,
+        # no action is executable until a real executor is wired into Node A.
+        if config.get("motion.enabled", False) is not True:
+            return False, "motion disabled"
+        return False, "motion executor unavailable"
     if action.kind in ("say", "ask_user"):
         text = (action.args or {}).get("text", "")
         if not text or len(text) > 400:

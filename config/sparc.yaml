@@ -7,6 +7,9 @@ endpoints:
   cortexd: "http://tokenators-MacBook-Pro.local:8800"
   genaid: "http://robot-genai.local:8700"
 
+motion:
+  enabled: false               # no executor exists yet; absent/malformed also fails closed
+
 personality:
   name: S.P.A.R.C
   # Eval-tuned 2026-07-03: compact persona beat verbose on restraint (S6) and is

@@ -1,12 +1,15 @@
 """Fixture tests — no hardware, no network. Run: pytest tests/ from repo root."""
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 for pkg in ("common", "node_a", "node_c"):
     sys.path.insert(0, str(ROOT / "packages" / pkg))
 
-from sparc_common.types import ThinkRequest, OptionMeta  # noqa: E402
+from sparc_common.types import MOTION_KINDS, Action, ThinkRequest, OptionMeta  # noqa: E402
 from sparc_node_c import prompts  # noqa: E402
 from sparc_node_a.perception.imx500_tripwire import CentroidTracker  # noqa: E402
 from sparc_common import narrative  # noqa: E402
@@ -257,6 +260,112 @@ def test_face_buffer_survives_presence_churn(tmp_path):
         w.buffer_face(eid, [1.0] + [0.0] * 511)
     w.person_left("trk_a")                  # churn: left view
     assert len(w.face_samples(eid)) == 4    # buffer survived
+
+
+@pytest.fixture
+def motion_config(tmp_path, monkeypatch):
+    from sparc_common import config
+
+    def set_config(motion_yaml: str) -> None:
+        cfg = tmp_path / "sparc.yaml"
+        cfg.write_text(motion_yaml)
+        monkeypatch.setenv("SPARC_CONFIG", str(cfg))
+        config.load.cache_clear()
+
+    yield set_config
+    config.load.cache_clear()
+
+
+@pytest.mark.parametrize("motion_kind", sorted(MOTION_KINDS))
+def test_disabled_motion_is_vetoed_and_only_fallback_executes(
+    tmp_path, motion_config, motion_kind
+):
+    from sparc_node_a.deliberation import Deliberation, Stage
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
+
+    motion_config("motion: {enabled: false}\n")
+    world = WorldModel(str(tmp_path / "world.db"))
+    orchestrator = object.__new__(Orchestrator)
+    orchestrator.world = world
+    orchestrator.bus = type(
+        "StubBus", (), {"publish_json": lambda self, *args, **kwargs: None}
+    )()
+    deliberation = Deliberation(event_type="test", trigger_desc="motion request")
+
+    orchestrator._execute_requested(deliberation, Action(kind=motion_kind))
+
+    rows = world.db.execute(
+        "SELECT kind, payload FROM trace WHERE deliberation_id=? ORDER BY rowid",
+        (deliberation.id,),
+    ).fetchall()
+    assert [kind for kind, _ in rows] == [
+        "requested", "vetoed", "fallback_executed"
+    ]
+    payloads = [json.loads(payload) for _, payload in rows]
+    assert payloads[0]["action"] == motion_kind
+    assert payloads[1] == {
+        "reason": "motion disabled", "action": motion_kind, "args": {}
+    }
+    assert payloads[2]["action"] == "wait"
+    assert payloads[2]["fallback_level"] == 3
+    assert deliberation.stage == Stage.EXECUTED
+    assert deliberation.partial_result.kind == "wait"
+
+
+def test_motion_wire_kind_is_stop_moving_not_stop():
+    assert "stop_moving" in MOTION_KINDS
+    assert "stop" not in MOTION_KINDS
+
+
+@pytest.mark.parametrize(
+    "motion_yaml",
+    ["{}\n", "motion: true\n", "motion: {enabled: 'true'}\n"],
+)
+def test_absent_or_malformed_motion_config_fails_closed(
+    tmp_path, motion_config, motion_yaml
+):
+    from sparc_node_a.deliberation import Deliberation, validate
+    from sparc_node_a.world_model import WorldModel
+
+    motion_config(motion_yaml)
+    world = WorldModel(str(tmp_path / "world.db"))
+    action = Action(kind=sorted(MOTION_KINDS)[0])
+    ok, reason = validate(
+        world, Deliberation(event_type="test", trigger_desc="motion request"), action
+    )
+    assert not ok
+    assert reason == "motion disabled"
+
+
+def test_enabled_motion_without_executor_is_vetoed_and_not_traced_executed(
+    tmp_path, motion_config
+):
+    from sparc_node_a.deliberation import Deliberation
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
+
+    motion_config("motion: {enabled: true}\n")
+    world = WorldModel(str(tmp_path / "world.db"))
+    orchestrator = object.__new__(Orchestrator)
+    orchestrator.world = world
+    orchestrator.bus = type(
+        "StubBus", (), {"publish_json": lambda self, *args, **kwargs: None}
+    )()
+    action = Action(kind=sorted(MOTION_KINDS)[0])
+    deliberation = Deliberation(event_type="test", trigger_desc="motion request")
+
+    orchestrator._execute_requested(deliberation, action)
+
+    rows = world.db.execute(
+        "SELECT kind, payload FROM trace WHERE deliberation_id=? ORDER BY rowid",
+        (deliberation.id,),
+    ).fetchall()
+    assert [kind for kind, _ in rows] == [
+        "requested", "vetoed", "fallback_executed"
+    ]
+    assert json.loads(rows[1][1])["reason"] == "motion executor unavailable"
+    assert all(kind != "executed" for kind, _ in rows)
 
 
 def test_face_track_association():

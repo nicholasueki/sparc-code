@@ -19,6 +19,7 @@ import httpx
 from sparc_common import config
 from sparc_common.bus import Bus
 from sparc_common.types import (
+    MOTION_KINDS,
     Action,
     DetectionFrame,
     SoundEvent,
@@ -313,13 +314,24 @@ class Orchestrator:
         d.stage = Stage.DECIDED
 
         # VALIDATE against live state, then execute (backup = deterministic wait)
+        self._execute_requested(d, action)
+
+    def _execute_requested(self, d: Deliberation, action: Action) -> None:
+        """Validate one requested action and truthfully trace its outcome."""
+        self.world.trace(d.id, "requested", {
+            "action": action.kind, "args": action.args,
+            "fallback_level": action.fallback_level, "age_s": round(d.age(), 2)})
         ok, reason = validate(self.world, d, action)
         if not ok:
-            self.world.trace(d.id, "vetoed", {"reason": reason, "action": action.kind})
+            self.world.trace(d.id, "vetoed", {
+                "reason": reason, "action": action.kind, "args": action.args})
             self.bus.publish_json("sparc/debug/thought", {
                 "kind": "note",
-                "text": f"vetoed {action.kind} ({reason}) — doing nothing instead"})
-            action = Action(kind="wait", why=f"vetoed: {reason}", fallback_level=3)
+                "text": f"vetoed {action.kind} ({reason}) — using safe wait fallback"})
+            fallback = Action(kind="wait", why=f"vetoed: {reason}", fallback_level=3)
+            d.partial_result = fallback
+            self.execute(d, fallback, trace_kind="fallback_executed")
+            return
         self.execute(d, action)
 
     def _memory_briefing(self, d: Deliberation) -> str:
@@ -348,7 +360,17 @@ class Orchestrator:
 
     # ----------------------------------------------------------- execute
 
-    def execute(self, d: Deliberation, action: Action) -> None:
+    def execute(
+        self,
+        d: Deliberation,
+        action: Action,
+        *,
+        trace_kind: str = "executed",
+    ) -> None:
+        if action.kind in MOTION_KINDS:
+            # Motion must never fall through this non-motion executor as a silent
+            # no-op. The validator currently routes all motion to a safe fallback.
+            raise RuntimeError("motion executor unavailable")
         d.stage = Stage.EXECUTED
         if action.kind in ("say", "ask_user"):
             text = action.args.get("text", "")
@@ -392,7 +414,7 @@ class Orchestrator:
             self.world.add_event("reminder_set",
                                  f"reminder: {action.args.get('text','')}", d.entity_ids, 0.5)
         mark_executed(self.world, d, action)
-        self.world.trace(d.id, "executed", {
+        self.world.trace(d.id, trace_kind, {
             "action": action.kind, "args": action.args,
             "fallback_level": action.fallback_level, "age_s": round(d.age(), 2)})
 
