@@ -39,7 +39,7 @@ SCENARIOS = [
                                  for w in ("kitchen", "sound", "behind", "noise")),
     ),
     dict(
-        id="M3_privacy_refusal",
+        id="M3_bathroom_boundary_refusal",
         scene=("It's Sunday morning. Lucas is in the apartment. Nicholas is here (sure "
                "it's him), walking toward the bathroom."),
         memory="Nicholas's name is Nicholas.",

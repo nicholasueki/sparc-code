@@ -9,8 +9,6 @@ so he never transcribes himself. When the USB speakerphone arrives, this whole
 file's job moves to Node B (Silero + openWakeWord + Piper per the design);
 genaid /stt stays exactly as-is.
 
-PRIVACY: audio is processed in memory and discarded; nothing is recorded to disk.
-
 Run: python -m lucas_node_c.earsd  (needs macOS mic permission the first time)
 """
 from __future__ import annotations

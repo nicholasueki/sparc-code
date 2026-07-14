@@ -4,10 +4,8 @@ Runs the postprocessed .rpk on the sensor NPU, tracks person boxes with a
 tiny nearest-centroid tracker, and emits DetectionFrame(new_track/lost_track)
 on the bus. ~0 host CPU: we only parse output tensors.
 
-Also serves single frames on demand (localhost only) for the VLM-in-the-loop
-path: GET 127.0.0.1:<frame_port>/frame.jpg -> one JPEG from the next camera
-request. PRIVACY: frames are produced on demand, held in memory, and never
-written to disk or exposed beyond localhost.
+Also serves single frames on demand for the VLM-in-the-loop path:
+GET 127.0.0.1:<frame_port>/frame.jpg -> one JPEG from the next camera request.
 
 Runs standalone in its own process: python -m lucas_node_a.perception.imx500_tripwire
 """
@@ -33,7 +31,7 @@ class FrameGrabber:
 
     The camera loop is the single owner of the Picamera2 pipeline; requesters
     set a flag and the loop fulfils it on its next iteration (no concurrent
-    camera access, no saved files)."""
+    camera access)."""
 
     def __init__(self, quality: int = 80):
         self.quality = quality

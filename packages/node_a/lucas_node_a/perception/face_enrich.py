@@ -6,8 +6,7 @@ While a person is in view (tracked via the tier0 bus), loop at ~1 Hz:
   publish on lucas/vision/rich.
 
 Identity RESOLUTION (cosine vs known_faces) happens in the orchestrator
-(design LIM-M1-3) — this process only produces vectors. No frames or crops
-are ever written to disk.
+(design LIM-M1-3) — this process only produces vectors.
 
 Run: python -m lucas_node_a.perception.face_enrich
 """

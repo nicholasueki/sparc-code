@@ -81,7 +81,7 @@ Grades the only part of motion the LLM owns — judgment — via `motion=true` t
 (schema live, execution gated off). See `../Motion_Control_Design.md` for the L0-L2 stack.
 
 **Final: 5/5** — approach on invitation (standoff 1.0 m ∈ bounds), look_at toward a crash
-("orient to identify the source before deciding whether to investigate"), privacy refusal,
+("orient to identify the source before deciding whether to investigate"), bathroom-boundary refusal,
 gentle back_up (0.15–0.3 m args), and no idle wandering.
 
 **Bugs found & fixed:**
