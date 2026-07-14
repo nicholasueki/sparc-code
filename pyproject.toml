@@ -43,8 +43,10 @@ node-b = [
   "uvicorn>=0.51,<0.52",
 ]
 
-# Node C runs in the existing macOS Python 3.12 ~/mlx312 environment. MLX
-# packages are platform-gated; model weights are never installed by pip.
+# Node C runs in the existing macOS 14+ arm64 Python 3.12 ~/mlx312 environment.
+# Python metadata can gate Darwin/Python but not the macOS deployment target;
+# scripts/bootstrap_python.sh enforces the OS and architecture before install.
+# Model weights are never installed by pip.
 node-c = [
   "fastapi>=0.139,<0.140",
   "fastembed>=0.8,<0.9",

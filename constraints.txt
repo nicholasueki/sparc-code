@@ -1,6 +1,6 @@
-# Reviewed base direct-dependency constraints shared by every target. Install a
-# named extra through its constraints-<group>.txt file; each group file includes
-# this one. Transitive dependencies remain resolver-managed.
+# Resolution input only: reviewed base direct pins shared by every target.
+# Runtime/bootstrap installation consumes the complete hash-locked files under
+# locks/. Regenerate those locks with scripts/lock_dependencies.sh.
 httpx==0.28.1
 paho-mqtt==2.1.0
 pydantic==2.13.4

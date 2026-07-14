@@ -1,22 +1,20 @@
 # Reproducible Python bootstrap
 
-Lucas supports four committed dependency groups. Always install a group through
-its `constraints-<group>.txt` file; do not copy package lists into deployment
-commands. Every group file includes the shared root `constraints.txt` contract.
+Lucas keeps readable direct dependency groups in `pyproject.toml` and installs
+complete generated locks from `locks/`. Every package in a runtime lock is exact
+and hash-checked; vendor libraries, OS packages, and model assets stay external.
 
-| Target | Python | Install group | External prerequisites |
-| --- | --- | --- | --- |
-| Developer/test | macOS 3.12 | `dev` | none for the hardware-free suite |
-| Node A | Debian 13 3.13 | `node-a` | Mosquitto, HailoRT/Hailo Python API, Picamera2/IMX500, OpenCV |
-| Node B | Debian 13 3.13 | `node-b` | HailoRT with the GenAI Python API and deployed HEFs |
-| Node C | macOS 3.12 (`~/mlx312`) | `node-c` | PortAudio, MLX-capable Apple Silicon, local model weights |
+| Target | Resolution platform | Lock |
+| --- | --- | --- |
+| Developer/test | macOS arm64 + x86_64, Python 3.12 | `locks/dev-macos-py312.txt` |
+| Node A | Debian 13 arm64 (manylinux glibc 2.39+), Python 3.13 | `locks/node-a-debian13-arm64-py313.txt` |
+| Node B | Debian 13 arm64 (manylinux glibc 2.39+), Python 3.13 | `locks/node-b-debian13-arm64-py313.txt` |
+| Node C | macOS 14+ arm64, Python 3.12 (`~/mlx312`) | `locks/node-c-macos14-arm64-py312.txt` |
 
-The manifest constrains every direct Python dependency to a reviewed compatible
-series. The group constraint files select exact reviewed direct versions.
-Transitive dependencies are resolved by pip; after changing a direct dependency,
-install and verify all supported groups before committing the new constraint.
-Node C pins NumPy 2.3.5 because the reviewed `mlx-whisper`/Numba stack requires
-NumPy below 2.4; other groups use NumPy 2.5.0.
+`scripts/bootstrap_python.sh` first installs the hash-locked packaging toolchain
+from `locks/bootstrap.txt` (`pip==26.1.2`, `setuptools==83.0.0`,
+`wheel==0.47.0`), then the selected runtime lock, then Lucas itself with no
+dependency resolution and no isolated build environment.
 
 ## Developer/test bootstrap
 
@@ -24,82 +22,91 @@ From a clean checkout on macOS with Python 3.12:
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -c constraints-dev.txt '.[dev]'
+scripts/bootstrap_python.sh dev
 .venv/bin/python -m pytest
 .venv/bin/python -c 'import lucas_common, lucas_node_a, lucas_node_b, lucas_node_c'
 ```
 
-The repository-local `.venv` is ignored. Recreating it does not modify the Git
-index, and deleting it is never part of deployment.
+The bootstrap fails if the host is not macOS or the interpreter is not Python
+3.12. The repository-local `.venv` is ignored and never removed by deployment.
 
 ## Node A
 
-Install the OS/vendor layer first. On the supported Debian 13 image this includes
-Mosquitto, Picamera2/IMX500, OpenCV, and the matching HailoRT `hailo_platform`
-package. Do not replace those packages with PyPI wheels. Then:
+Install the Debian 13/vendor layer first: Mosquitto, Picamera2/IMX500, OpenCV,
+and the matching HailoRT `hailo_platform` package. These stay outside pip and are
+visible through the system-site venv:
 
 ```bash
 python3 -m venv --system-site-packages ~/lucas_venv
-~/lucas_venv/bin/python -m pip install -c constraints-node-a.txt '.[node-a]'
+PYTHON="$HOME/lucas_venv/bin/python" scripts/bootstrap_python.sh node-a
 ~/lucas_venv/bin/python -c 'import lucas_node_a.orchestrator; import lucas_node_a.perception.imx500_tripwire; import lucas_node_a.perception.face_enrich'
 ```
 
-Hardware-free import checks do not open a camera or Hailo device. A fleet smoke
-must additionally verify `hailo_platform`, `picamera2`, and `cv2`, then start the
-Node A services against the configured hardware.
-
 ## Node B
 
-Install the vendor HailoRT release that provides both `hailo_platform` and
-`hailo_platform.genai`, and provision the configured LLM/Whisper HEFs separately.
-Then:
+Install the vendor HailoRT release providing `hailo_platform` and
+`hailo_platform.genai`, and provision the configured LLM/Whisper HEFs externally:
 
 ```bash
 python3 -m venv --system-site-packages ~/lucas_venv
-~/lucas_venv/bin/python -m pip install -c constraints-node-b.txt '.[node-b]'
+PYTHON="$HOME/lucas_venv/bin/python" scripts/bootstrap_python.sh node-b
 ~/lucas_venv/bin/python -c 'import lucas_node_b.genaid as g; assert g.health()["ok"]'
 ```
 
-Importing `genaid` and calling its health function does not load Hailo or require
-a HEF. On the actual node, start the service and confirm `/health`; absent model
-files are reported as `llm_loaded=false` or `stt_loaded=false`, not downloaded.
-
 ## Node C
 
-Node C deliberately keeps the established `~/mlx312` Python 3.12 environment:
+Node C is supported only on Apple-silicon arm64 running macOS 14 or newer with
+Python 3.12 at `~/mlx312`. This minimum is required by the locked MLX wheels.
+Bootstrap checks the OS, architecture, OS major version, and Python version
+before installing anything and emits a clear error if the contract is not met:
 
 ```bash
-~/.local/bin/uv pip install --python ~/mlx312/bin/python -c constraints-node-c.txt '.[node-c]'
+PYTHON="$HOME/mlx312/bin/python" scripts/bootstrap_python.sh node-c
 ~/mlx312/bin/python -c 'import lucas_node_c.cortexd as c; assert c.health()["ok"] is False'
 ~/mlx312/bin/python -c 'import lucas_node_c.earsd'
 ```
 
-The `node-c` group includes the MLX VLM and local Whisper fallback libraries, but
-pip does not fetch model weights. Keep these configured assets external:
+The Node C lock includes MLX VLM and local Whisper libraries, not model weights:
 
-- Ornith/MLX VLM: `node_c.mlx.model_path` in `config/lucas.yaml` (currently
-  `/Users/tokenator/models/Ornith-N-24B-A3B-Thinking-MLX-4bit`).
-- Local Whisper fallback: `node_c.ears.mlx_whisper_model` (currently the
-  Hugging Face id `mlx-community/whisper-base-mlx`, cached outside this repo).
+- Ornith/MLX VLM: `node_c.mlx.model_path` in `config/lucas.yaml`.
+- Local Whisper fallback: `node_c.ears.mlx_whisper_model`, cached outside Git.
 - Node B Hailo models: `node_b.hef_dir`, `node_b.llm_hef`, and `node_b.stt_hef`.
-- Node A Hailo HEFs and the IMX500 `.rpk`: OS/vendor paths in source/config.
+- Node A Hailo HEFs and IMX500 `.rpk`: OS/vendor paths in source/config.
 
-The source checkout must not contain model weights, HEFs, `.rpk` files, runtime
-databases, logs, or generated evaluation output. Those paths are ignored by Git.
+## Deployment
 
-## Deployment and verification boundary
+`scripts/deploy.sh {a|b|c|all}` syncs the checkout and invokes the same bootstrap
+script with the matching lock. It does not install OS packages, download models,
+install services, or run fleet health checks. Use `scripts/install_services.sh`
+only after external platform prerequisites exist.
 
-`scripts/deploy.sh {a|b|c|all}` syncs the checkout and installs the corresponding
-named group through its group-specific constraints file. It does not install OS
-packages, download models, install services, or run fleet health checks. Use
-`scripts/install_services.sh` only after the platform prerequisites above exist.
+## Reproducible lock regeneration
 
-Before committing dependency changes, run the developer bootstrap in a newly
-created venv and verify the index is free of generated files:
+Locks are generated with `uv==0.9.28`, an upload cutoff of
+`2026-07-14T18:17:36Z`, exact direct pins plus reviewed compatibility pins from
+`constraints-*.txt`, binary-only target resolution, and SHA-256 hashes. The
+script resolves Debian 13 against `aarch64-manylinux_2_39`, resolves Node C with
+`MACOSX_DEPLOYMENT_TARGET=14.0`, and requires identical dev graphs for macOS
+arm64 and x86_64.
+
+Bootstrap the pinned resolver and regenerate:
 
 ```bash
-git ls-files | grep -E '(^|/)(\.venv|__pycache__|\.pytest_cache)(/|$)|\.py[co]$|\.(db|sqlite|sqlite3|log)$'
+python3.12 -m venv .lock-venv
+.lock-venv/bin/python -m pip install --require-hashes --no-deps -r locks/bootstrap.txt
+.lock-venv/bin/python -m pip install --require-hashes --no-deps -r locks/lock-tools.txt
+UV_BIN=.lock-venv/bin/uv scripts/lock_dependencies.sh
+git diff --exit-code -- locks/
+```
+
+The last command must be empty when regeneration is reproducible. Direct-version
+changes begin in `pyproject.toml` and its matching `constraints-*.txt` resolution
+input, followed by regeneration and clean verification of every supported lock.
+
+Verify generated paths remain outside the index:
+
+```bash
+git ls-files | grep -E '(^|/)(\.venv|\.lock-venv|__pycache__|\.pytest_cache)(/|$)|\.py[co]$|\.(db|sqlite|sqlite3|log)$'
 ```
 
 The command must produce no output.

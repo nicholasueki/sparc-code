@@ -1,4 +1,6 @@
 -c constraints.txt
 
+# Resolution input only; install locks/node-a-debian13-arm64-py313.txt.
+
 numpy==2.5.0
 Pillow==12.3.0

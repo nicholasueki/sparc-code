@@ -27,10 +27,10 @@ deploy_node() {
     --exclude '*.hef' --exclude '*.rpk' --exclude '*.gguf' --exclude '*.safetensors' \
     "$REPO/" "$HOST:$DEST/"
   if [ "$1" = "c" ]; then
-    ssh "$HOST" "cd '$DEST' && ~/.local/bin/uv pip install --python ~/mlx312/bin/python -q -c 'constraints-${EXTRA}.txt' '.[${EXTRA}]' && echo deps-ok"
+    ssh "$HOST" "cd '$DEST' && PYTHON=\"\$HOME/mlx312/bin/python\" scripts/bootstrap_python.sh '$EXTRA'"
   else
     ssh "$HOST" "python3 -m venv --system-site-packages ~/sparc_venv 2>/dev/null || true; \
-                 cd '$DEST' && ~/sparc_venv/bin/pip install -q -c 'constraints-${EXTRA}.txt' '.[${EXTRA}]' && echo deps-ok"
+                 cd '$DEST' && PYTHON=\"\$HOME/sparc_venv/bin/python\" scripts/bootstrap_python.sh '$EXTRA'"
   fi
   echo "== node_$1 deployed"
 }
