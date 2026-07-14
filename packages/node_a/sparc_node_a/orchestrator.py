@@ -238,7 +238,7 @@ class Orchestrator:
 
     def _maybe_frame(self, d: Deliberation) -> str | None:
         """One live JPEG (base64) for events where seeing helps. Fail-open:
-        no frame is never an error, just a text-only think. Never persisted."""
+        no frame is never an error, just a text-only think."""
         if not config.get("node_a.vision_in_loop", True):
             return None
         wants = d.event_type in ("person_enters", "sound_event") or (

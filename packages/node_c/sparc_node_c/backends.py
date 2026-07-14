@@ -12,6 +12,7 @@ import io
 import logging
 import tempfile
 import time
+from os import unlink
 from typing import Optional, Protocol
 
 log = logging.getLogger("sparc.backend")
@@ -58,36 +59,48 @@ class MLXBackend:
     ) -> str:
         images: list[str] = []
         tmp = None
-        if image_b64:
-            tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-            tmp.write(base64.b64decode(image_b64))
-            tmp.flush()
-            images = [tmp.name]
+        try:
+            if image_b64:
+                tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                tmp.write(base64.b64decode(image_b64))
+                tmp.flush()
+                tmp.close()
+                images = [tmp.name]
 
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-        prompt = self._apply_chat_template(
-            self.processor, self.config, messages, num_images=len(images)
-        )
-        result = self._generate(
-            self.model,
-            self.processor,
-            prompt,
-            image=images or None,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            verbose=False,
-        )
-        text = getattr(result, "text", None)
-        if text is None:  # older mlx-vlm returns str
-            text = str(result)
-        if tmp is not None:
-            import os
-
-            os.unlink(tmp.name)
-        return text
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            prompt = self._apply_chat_template(
+                self.processor, self.config, messages, num_images=len(images)
+            )
+            result = self._generate(
+                self.model,
+                self.processor,
+                prompt,
+                image=images or None,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                verbose=False,
+            )
+            text = getattr(result, "text", None)
+            if text is None:  # older mlx-vlm returns str
+                text = str(result)
+            return text
+        finally:
+            if tmp is not None:
+                try:
+                    tmp.close()
+                except Exception:
+                    log.exception(
+                        "failed to close MLX frame temporary file %s", tmp.name
+                    )
+                try:
+                    unlink(tmp.name)
+                except Exception:
+                    log.exception(
+                        "failed to remove MLX frame temporary file %s", tmp.name
+                    )
 
     def info(self) -> dict:
         return {"backend": "mlx", "model": self.model_path, "load_s": self.load_s}

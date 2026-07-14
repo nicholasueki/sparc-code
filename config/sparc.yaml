@@ -44,7 +44,7 @@ node_a:
     person_lost_s: 5.0
     frame_port: 8600       # localhost-only single-frame server (v0.2)
     frame_quality: 80
-  vision_in_loop: true     # attach one live frame to visual-event thinks; NEVER persisted
+  vision_in_loop: true     # attach one live frame to visual-event thinks
   face:                    # v0.4 identity enrichment (Hailo-8)
     enrich_hz: 1.0
     face_conf: 0.55
