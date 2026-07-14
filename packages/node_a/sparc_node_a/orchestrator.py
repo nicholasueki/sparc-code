@@ -325,12 +325,18 @@ class Orchestrator:
         if not ok:
             self.world.trace(d.id, "vetoed", {
                 "reason": reason, "action": action.kind, "args": action.args})
-            self.bus.publish_json("sparc/debug/thought", {
-                "kind": "note",
-                "text": f"vetoed {action.kind} ({reason}) — using safe wait fallback"})
             fallback = Action(kind="wait", why=f"vetoed: {reason}", fallback_level=3)
             d.partial_result = fallback
             self.execute(d, fallback, trace_kind="fallback_executed")
+            try:
+                self.bus.publish_json("sparc/debug/thought", {
+                    "kind": "note",
+                    "text": (
+                        f"vetoed {action.kind} ({reason}) — using safe wait fallback"
+                    ),
+                })
+            except Exception as e:
+                log.warning("debug telemetry unavailable after action veto: %s", e)
             return
         self.execute(d, action)
 

@@ -368,6 +368,39 @@ def test_enabled_motion_without_executor_is_vetoed_and_not_traced_executed(
     assert all(kind != "executed" for kind, _ in rows)
 
 
+def test_motion_fallback_survives_debug_telemetry_failure(
+    tmp_path, motion_config
+):
+    from lucas_node_a.deliberation import Deliberation, Stage
+    from lucas_node_a.orchestrator import Orchestrator
+    from lucas_node_a.world_model import WorldModel
+
+    class RaisingBus:
+        def publish_json(self, *args, **kwargs):
+            raise RuntimeError("debug broker unavailable")
+
+    motion_config("motion: {enabled: false}\n")
+    world = WorldModel(str(tmp_path / "world.db"))
+    orchestrator = object.__new__(Orchestrator)
+    orchestrator.world = world
+    orchestrator.bus = RaisingBus()
+    deliberation = Deliberation(event_type="test", trigger_desc="motion request")
+
+    orchestrator._execute_requested(
+        deliberation, Action(kind=sorted(MOTION_KINDS)[0])
+    )
+
+    rows = world.db.execute(
+        "SELECT kind FROM trace WHERE deliberation_id=? ORDER BY rowid",
+        (deliberation.id,),
+    ).fetchall()
+    assert [kind for kind, in rows] == [
+        "requested", "vetoed", "fallback_executed"
+    ]
+    assert deliberation.stage == Stage.EXECUTED
+    assert deliberation.partial_result.kind == "wait"
+
+
 def test_face_track_association():
     from sparc_node_a.perception.face_enrich import match_face_to_track
     boxes = {"near": (0.4, 0.2, 0.7, 0.95), "far": (0.35, 0.3, 0.8, 1.0),
