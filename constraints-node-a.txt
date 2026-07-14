@@ -1,0 +1,4 @@
+-c constraints.txt
+
+numpy==2.5.0
+Pillow==12.3.0

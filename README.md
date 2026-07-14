@@ -47,5 +47,10 @@ tests/                          fixture-driven unit tests (no hardware needed)
 - Node A: `python -m sparc_node_a.orchestrator` (needs mosquitto running locally)
 - Node B: `python -m sparc_node_b.genaid`
 - Node C: `python -m sparc_node_c.cortexd`
-- Deploy: `scripts/deploy.sh {a|b|c|all}` (rsync to the node, restart systemd unit)
-- Tests: `pytest tests/` from repo root (pure-Python, hardware mocked by fixtures)
+- Deploy: `scripts/deploy.sh {a|b|c|all}` (rsync and install the named dependency
+  group); use `scripts/install_services.sh` to install/restart supervisors.
+- Bootstrap: see [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md) for the reviewed
+  `dev`, `node-a`, `node-b`, and `node-c` dependency contracts and external
+  hardware/model prerequisites.
+- Tests: `.venv/bin/python -m pytest` from repo root (pure-Python, hardware mocked
+  by fixtures)

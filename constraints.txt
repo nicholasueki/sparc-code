@@ -1,0 +1,7 @@
+# Reviewed base direct-dependency constraints shared by every target. Install a
+# named extra through its constraints-<group>.txt file; each group file includes
+# this one. Transitive dependencies remain resolver-managed.
+httpx==0.28.1
+paho-mqtt==2.1.0
+pydantic==2.13.4
+PyYAML==6.0.3

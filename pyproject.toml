@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lucas-robot"
+version = "0.1.0"
+description = "Local services for the Lucas companion robot"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "httpx>=0.28,<0.29",
+  "paho-mqtt>=2.1,<3",
+  "pydantic>=2.13,<3",
+  "PyYAML>=6.0,<7",
+]
+
+[project.optional-dependencies]
+# Hardware-free developer/test contract for macOS Python 3.12. It contains the
+# import-time dependencies for every node, but deliberately excludes model and
+# hardware runtimes so tests never require a device or model download.
+dev = [
+  "fastapi>=0.139,<0.140",
+  "fastembed>=0.8,<0.9",
+  "numpy>=2.5,<3",
+  "Pillow>=12.3,<13",
+  "pytest>=9.1,<10",
+  "sqlite-vec>=0.1.9,<0.2",
+  "uvicorn>=0.51,<0.52",
+]
+
+# HailoRT, Picamera2, and OpenCV are installed from the Node A OS/vendor image
+# and exposed to this venv through --system-site-packages.
+node-a = [
+  "numpy>=2.5,<3",
+  "Pillow>=12.3,<13",
+]
+
+# hailo_platform (including its GenAI API) remains vendor-provided.
+node-b = [
+  "fastapi>=0.139,<0.140",
+  "numpy>=2.5,<3",
+  "uvicorn>=0.51,<0.52",
+]
+
+# Node C runs in the existing macOS Python 3.12 ~/mlx312 environment. MLX
+# packages are platform-gated; model weights are never installed by pip.
+node-c = [
+  "fastapi>=0.139,<0.140",
+  "fastembed>=0.8,<0.9",
+  "mlx-vlm>=0.6.3,<0.6.4; platform_system == 'Darwin' and python_version == '3.12'",
+  "mlx-whisper>=0.4.3,<0.5; platform_system == 'Darwin' and python_version == '3.12'",
+  # mlx-whisper's Numba runtime currently requires NumPy below 2.4.
+  "numpy>=2.3,<2.4",
+  "sounddevice>=0.5.5,<0.6; platform_system == 'Darwin'",
+  "sqlite-vec>=0.1.9,<0.2",
+  "uvicorn>=0.51,<0.52",
+  "webrtcvad-wheels>=2.0.14,<2.1",
+]
+
+[tool.setuptools.packages.find]
+where = [
+  "packages/common",
+  "packages/node_a",
+  "packages/node_b",
+  "packages/node_c",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
