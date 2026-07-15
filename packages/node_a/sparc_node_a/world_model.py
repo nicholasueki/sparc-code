@@ -96,13 +96,21 @@ class WorldModel:
         entity becomes live only after a positive face match.
         """
         name, identity, provenance, eid = None, "unknown", "none", None
+        ownership_conflict = None
         if embedding is not None:
             evidence = self._face_evidence(embedding)
             if evidence and evidence[2] == "known":
-                eid, name, identity, similarity = evidence
-                provenance = "face"
-                self._trace_identity(
-                    "confirm", "known_match", None, eid, eid, similarity, 1)
+                candidate_eid, candidate_name, _, similarity = evidence
+                incumbent = self.present.get(candidate_eid)
+                if (incumbent is not None
+                        and incumbent.get("track_id") != track_id):
+                    identity, provenance = "uncertain", "face"
+                    ownership_conflict = (candidate_eid, similarity)
+                else:
+                    eid, name, identity = candidate_eid, candidate_name, "known"
+                    provenance = "face"
+                    self._trace_identity(
+                        "confirm", "known_match", None, eid, eid, similarity, 1)
             elif evidence and evidence[2] == "uncertain":
                 identity, provenance = "uncertain", "face"
         reappeared = False
@@ -140,10 +148,15 @@ class WorldModel:
         }
         if identity == "uncertain":
             evidence = self._face_evidence(embedding or [])
-            self._trace_identity(
-                "uncertain", "uncertain_match", None, eid,
-                evidence[0] if evidence else None,
-                evidence[3] if evidence else None, 1)
+            if ownership_conflict:
+                self._trace_identity(
+                    "ownership_conflict", "known_match_live_conflict",
+                    eid, eid, ownership_conflict[0], ownership_conflict[1], 1)
+            else:
+                self._trace_identity(
+                    "uncertain", "uncertain_match", None, eid,
+                    evidence[0] if evidence else None,
+                    evidence[3] if evidence else None, 1)
         return eid, name, identity, reappeared
 
     def live_name(self, entity_id: str) -> Optional[str]:
@@ -256,7 +269,17 @@ class WorldModel:
         return entity_id, None, "uncertain"
 
     def _bind_anonymous(self, entity_id: str, known_eid: str, name: str,
-                        similarity: float) -> tuple[str, str, str]:
+                        similarity: float) -> tuple[str, Optional[str], str]:
+        info = self.present[entity_id]
+        incumbent = self.present.get(known_eid)
+        if (incumbent is not None
+                and incumbent.get("track_id") != info.get("track_id")):
+            info["identity_state"] = "uncertain"
+            info["identity_provenance"] = "face"
+            self._trace_identity(
+                "ownership_conflict", "known_match_live_conflict",
+                entity_id, entity_id, known_eid, similarity, 1)
+            return entity_id, None, "uncertain"
         info = self.present.pop(entity_id)
         self.present[known_eid] = {
             **info, "name": name, "identity_state": "known",
@@ -274,9 +297,19 @@ class WorldModel:
         return known_eid, name, "known"
 
     def _rebind_known(self, entity_id: str, known_eid: str, name: str,
-                      similarity: float) -> tuple[str, str, str]:
-        info = self.present.pop(entity_id)
+                      similarity: float) -> tuple[str, Optional[str], str]:
+        info = self.present[entity_id]
         count = len(self.contradiction_buffer.get(entity_id, []))
+        incumbent = self.present.get(known_eid)
+        if (incumbent is not None
+                and incumbent.get("track_id") != info.get("track_id")):
+            info["identity_state"] = "uncertain"
+            info["identity_provenance"] = "face"
+            self._trace_identity(
+                "ownership_conflict", "different_known_live_conflict",
+                entity_id, entity_id, known_eid, similarity, count)
+            return entity_id, None, "uncertain"
+        info = self.present.pop(entity_id)
         self.present[known_eid] = {
             **info, "name": name, "identity_state": "known",
             "identity_provenance": "face",

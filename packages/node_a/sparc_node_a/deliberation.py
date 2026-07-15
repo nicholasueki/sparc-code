@@ -6,7 +6,6 @@ never leaves Node A (INV-3).
 """
 from __future__ import annotations
 
-import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -109,6 +108,34 @@ def _render_event(type_: str, description: str) -> str:
 
 # -------------------------------------------------------------- validator
 
+GENERIC_GREETING = "Oh — hi there!"
+
+
+def grounded_greeting_text(world, delib: Deliberation) -> str | None:
+    """Return the only greeting text authorized for this exact live target."""
+    if delib.event_type != "person_enters" or len(delib.entity_ids) != 1:
+        return None
+    target = delib.entity_ids[0]
+    if target not in world.present:
+        return None
+    name = world.live_name(target)
+    return f"Hi {name}!" if name else GENERIC_GREETING
+
+
+def ground_greeting(world, delib: Deliberation, action: Action) -> Action:
+    """Replace unconstrained arrival prose with target-authorized greeting text."""
+    if (delib.event_type != "person_enters"
+            or action.kind not in ("say", "ask_user")):
+        return action
+    text = grounded_greeting_text(world, delib)
+    if text is None:
+        return action
+    why = "; ".join(filter(None, (action.why, "identity-grounded greeting")))
+    return action.model_copy(update={
+        "kind": "say", "args": {"text": text}, "why": why,
+    })
+
+
 def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
     """Deterministic re-check against LIVE state (LIM-M2-3). -> (ok, reason)."""
     if action.kind in MOTION_KINDS:
@@ -122,28 +149,19 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
         if not text or len(text) > 400:
             return False, "say/ask text missing or too long"
         if delib.event_type == "person_enters":
-            # person must still be present
-            if delib.entity_ids and not any(e in world.present for e in delib.entity_ids):
-                return False, "person already left"
+            expected = grounded_greeting_text(world, delib)
+            if expected is None:
+                return False, "greeting target unavailable"
+            if action.kind != "say" or text != expected:
+                return False, "greeting is not grounded to its live target"
             cooldown = config.get("node_a.cooldowns.greet_same_person_s", 300)
-            key = f"greet:{delib.entity_ids[0] if delib.entity_ids else 'unknown'}"
+            key = f"greet:{delib.entity_ids[0]}"
             if time.time() - world.last_action_ts.get(key, 0) < cooldown:
                 return False, "greeting cooldown"
             # global greet cooldown: identity churn must never cause rapid re-greeting
             global_cd = config.get("node_a.cooldowns.greet_anyone_s", 60)
             if time.time() - world.last_action_ts.get("greet:*", 0) < global_cd:
                 return False, "global greeting cooldown"
-            # A greeting computed from a now-stale named snapshot may still be
-            # generic, but it may never speak a durable name while live identity
-            # is uncertain or lacks face provenance.
-            low = text.casefold()
-            for eid, info in world.present.items():
-                durable_name = info.get("name")
-                if (durable_name and not world.live_name(eid)
-                        and re.search(
-                            rf"(?<!\w){re.escape(durable_name.casefold())}(?!\w)",
-                            low)):
-                    return False, "named greeting lacks confirmed live face identity"
     if action.kind == "remember":
         if not (action.args or {}).get("statement"):
             return False, "remember without statement"

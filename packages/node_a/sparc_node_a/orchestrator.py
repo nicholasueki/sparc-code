@@ -29,7 +29,15 @@ from sparc_common.types import (
     Transcript,
 )
 
-from .deliberation import Deliberation, Stage, Tier, mark_executed, serialize_scene, validate
+from .deliberation import (
+    Deliberation,
+    Stage,
+    Tier,
+    ground_greeting,
+    mark_executed,
+    serialize_scene,
+    validate,
+)
 from .world_model import WorldModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -327,6 +335,19 @@ class Orchestrator:
 
     def _execute_requested(self, d: Deliberation, action: Action) -> None:
         """Validate one requested action and truthfully trace its outcome."""
+        grounded = ground_greeting(self.world, d, action)
+        if grounded != action:
+            self.world.trace(d.id, "greeting_grounded", {
+                "target_entity": d.entity_ids[0] if len(d.entity_ids) == 1 else None,
+                "requested": action.args.get("text"),
+                "executable": grounded.args.get("text"),
+                "live_name": (
+                    self.world.live_name(d.entity_ids[0])
+                    if len(d.entity_ids) == 1 else None
+                ),
+            })
+            action = grounded
+            d.partial_result = action
         self.world.trace(d.id, "requested", {
             "action": action.kind, "args": action.args,
             "fallback_level": action.fallback_level, "age_s": round(d.age(), 2)})

@@ -552,8 +552,8 @@ def test_uncertain_live_known_suppresses_scene_and_named_greeting(tmp_path):
         event_type="person_enters", trigger_desc="arrival", entity_ids=[known])
     ok, why = validate(
         w, d, Action(kind="say", args={"text": "Hi Nicholas!"}))
-    assert not ok and "confirmed live face" in why
-    ok, why = validate(w, d, Action(kind="say", args={"text": "Hi there!"}))
+    assert not ok and "live target" in why
+    ok, why = validate(w, d, Action(kind="say", args={"text": "Oh — hi there!"}))
     assert ok, why
 
 
@@ -711,3 +711,180 @@ def test_anonymous_tracker_flap_does_not_schedule_second_greeting(tmp_path):
     assert o.world.entity_by_track("flap") == anonymous
     assert o._pending_births == {}
     assert o.world.last_action_ts[f"greet:{anonymous}"] == 123.0
+
+
+@pytest.mark.parametrize("requested", ["Hi Nicholas!", "Hi Beatrice!"])
+def test_anonymous_arrival_replaces_ungrounded_name_with_generic_greeting(
+        tmp_path, requested):
+    """Absent enrollment and arbitrary prose are never executable identities."""
+    from lucas_node_a.deliberation import Deliberation, validate
+    from lucas_node_a.orchestrator import Orchestrator
+    from lucas_node_a.world_model import WorldModel
+
+    class RecordingBus:
+        def __init__(self):
+            self.spoken = []
+
+        def publish(self, _topic, payload):
+            self.spoken.append(payload.text)
+
+        def publish_json(self, *_args, **_kwargs):
+            pass
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("known", [1.0, 0.0, 0.0])
+    w.person_left("known")
+    stranger, *_ = w.person_appeared("stranger")
+    d = Deliberation(
+        event_type="person_enters", trigger_desc="arrival", entity_ids=[stranger])
+    raw = Action(kind="say", args={"text": requested})
+
+    ok, why = validate(w, d, raw)
+    assert not ok and "live target" in why
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = w
+    o.bus = RecordingBus()
+    o._execute_requested(d, raw)
+
+    assert o.bus.spoken == ["Oh — hi there!"]
+    assert all(name not in o.bus.spoken[0] for name in ("Nicholas", "Beatrice"))
+    assert d.partial_result.args["text"] == "Oh — hi there!"
+    trace = w.db.execute(
+        "SELECT payload FROM trace WHERE deliberation_id=? AND kind='greeting_grounded'",
+        (d.id,),
+    ).fetchone()
+    assert json.loads(trace[0])["live_name"] is None
+    assert known not in w.present
+
+
+def test_confirmed_target_gets_only_its_grounded_named_greeting(tmp_path):
+    from lucas_node_a.deliberation import Deliberation, validate
+    from lucas_node_a.orchestrator import Orchestrator
+    from lucas_node_a.world_model import WorldModel
+
+    class RecordingBus:
+        def __init__(self):
+            self.spoken = []
+
+        def publish(self, _topic, payload):
+            self.spoken.append(payload.text)
+
+        def publish_json(self, *_args, **_kwargs):
+            pass
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("known", [1.0, 0.0, 0.0])
+    d = Deliberation(
+        event_type="person_enters", trigger_desc="arrival", entity_ids=[known])
+    correct = Action(kind="say", args={"text": "Hi Nicholas!"})
+    assert validate(w, d, correct) == (True, "ok")
+    assert validate(
+        w, d, Action(kind="say", args={"text": "Hi Beatrice!"})
+    )[0] is False
+
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = w
+    o.bus = RecordingBus()
+    o._execute_requested(
+        d, Action(kind="say", args={"text": "Welcome, Beatrice!"}))
+    assert o.bus.spoken == ["Hi Nicholas!"]
+
+
+def test_anonymous_bind_conflict_preserves_incumbent_and_source(tmp_path):
+    from lucas_node_a.deliberation import serialize_scene
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("nick-track", [1.0, 0.0, 0.0])
+    source, *_ = w.person_appeared("stranger-track")
+    w.buffer_face(known, [1.0, 0.0, 0.0])
+    w.buffer_face(source, [0.0, 0.0, 1.0])
+    old_event = w.add_event("observed", "the stranger waved", [source], 0.6)
+
+    eid, name, state = w.update_identity(source, [1.0, 0.0, 0.0], 0.9)
+
+    assert (eid, name, state) == (source, None, "uncertain")
+    assert w.entity_by_track("nick-track") == known
+    assert w.entity_by_track("stranger-track") == source
+    assert w.present[known]["track_id"] == "nick-track"
+    assert w.live_name(known) == "Nicholas" and w.live_name(source) is None
+    assert w.face_samples(known) == [[1.0, 0.0, 0.0]]
+    assert w.face_samples(source) == [[0.0, 0.0, 1.0]]
+    assert "Nicholas" in serialize_scene(w)
+    assert "identity Lucas is uncertain about" in serialize_scene(w)
+    assert json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (old_event,)).fetchone()[0]
+    ) == [source]
+    assert w.db.execute(
+        "SELECT track_id, present FROM entities WHERE id=?", (known,)
+    ).fetchone() == ("nick-track", 1)
+    payload = json.loads(w.db.execute(
+        "SELECT payload FROM trace WHERE kind='identity_transition' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0])
+    assert payload["transition"] == "ownership_conflict"
+    assert payload["candidate_entity"] == known
+
+    assert w.person_left("stranger-track") == source
+    assert w.entity_by_track("stranger-track") is None
+    assert w.entity_by_track("nick-track") == known
+
+
+def test_known_rebind_conflict_preserves_both_tracks_and_later_leaves(tmp_path):
+    from lucas_node_a.deliberation import serialize_scene
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    maya = w.enroll_face("Maya", [0.0, 1.0, 0.0])
+    w.person_appeared("nick-track", [1.0, 0.0, 0.0])
+    w.person_appeared("maya-track", [0.0, 1.0, 0.0])
+    w.buffer_face(nicholas, [1.0, 0.0, 0.0])
+    w.buffer_face(maya, [0.0, 1.0, 0.0])
+    event = w.add_event("observed", "both people waved", [nicholas, maya], 0.6)
+
+    first = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+    second = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+
+    assert first == (nicholas, None, "uncertain")
+    assert second == (nicholas, None, "uncertain")
+    assert w.entity_by_track("nick-track") == nicholas
+    assert w.entity_by_track("maya-track") == maya
+    assert w.present[maya]["track_id"] == "maya-track"
+    assert w.live_name(nicholas) is None and w.live_name(maya) == "Maya"
+    assert w.face_samples(nicholas) == [[1.0, 0.0, 0.0]]
+    assert w.face_samples(maya) == [[0.0, 1.0, 0.0]]
+    scene = serialize_scene(w)
+    assert "identity Lucas is uncertain about" in scene and "Maya" in scene
+    assert json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (event,)).fetchone()[0]
+    ) == [nicholas, maya]
+    payload = json.loads(w.db.execute(
+        "SELECT payload FROM trace WHERE kind='identity_transition' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0])
+    assert payload["transition"] == "ownership_conflict"
+    assert payload["evidence_class"] == "different_known_live_conflict"
+
+    assert w.person_left("maya-track") == maya
+    assert w.entity_by_track("maya-track") is None
+    assert w.entity_by_track("nick-track") == nicholas
+    assert w.person_left("nick-track") == nicholas
+    assert not w.present
+
+
+def test_direct_positive_arrival_cannot_claim_already_live_enrollment(tmp_path):
+    from lucas_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("incumbent", [1.0, 0.0, 0.0])
+
+    source, name, state, _ = w.person_appeared(
+        "conflicting", [1.0, 0.0, 0.0])
+    assert source != known and name is None and state == "uncertain"
+    assert w.entity_by_track("incumbent") == known
+    assert w.entity_by_track("conflicting") == source
