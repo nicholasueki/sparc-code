@@ -81,17 +81,13 @@ class Orchestrator:
             db_ready = True
         except Exception:
             db_ready = False
-        # T6 owns the bounded-session implementation. Until its runtime marker is
-        # present, the v0.3 capability verifier must conservatively reject this
-        # daemon instead of mistaking the legacy rolling prompt window for a session.
-        bounded = bool(getattr(self.world, "bounded_session_runtime", False))
         details = {
             "db_ready": db_ready,
             "mqtt_ready": self.bus.connected,
-            "bounded_session_runtime": bounded,
         }
-        # Overall service health is profile-neutral. The v0.3 verifier separately
-        # requires bounded_session_runtime; v0.4 only depends on DB + MQTT.
+        # T6 owns bounded-session readiness and must add its real runtime evidence.
+        # Until then the v0.3 verifier rejects the absent defining detail; v0.4
+        # remains independently gated by the profile-neutral DB + MQTT checks.
         ready = bool(db_ready and self.bus.connected)
         missing = [name for name in ("db_ready", "mqtt_ready") if not details[name]]
         return {
