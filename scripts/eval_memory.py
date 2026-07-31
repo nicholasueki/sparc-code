@@ -26,8 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 for pkg in ("common", "node_a", "node_c"):
     sys.path.insert(0, str(ROOT / "packages" / pkg))
 
-from sar_node_a.world_model import WorldModel  # noqa: E402
-from sar_node_c.memory import SemanticMemory  # noqa: E402
+from sparc_node_a.world_model import WorldModel  # noqa: E402
+from sparc_node_c.memory import SemanticMemory  # noqa: E402
 
 CORTEX = "http://10.1.215.33:8800"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -37,20 +37,20 @@ EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DAY1_EVENTS = [
     ("person_entered", "someone new came into view"),
     ("user_said", 'someone said: "Hi! I\'m Maya, Nicholas\'s sister — I\'m visiting for the week."'),
-    ("sar_said", 'SAR said: "Nice to meet you, Maya! Welcome."'),
+    ("sparc_said", 'SPARC said: "Nice to meet you, Maya! Welcome."'),
     ("user_said", 'someone said: "Nicholas is stuck at work until late tonight."'),
-    ("person_left", "they left SAR's view"),
+    ("person_left", "they left SPARC's view"),
     ("sound", "a doorbell sound was heard"),
     ("person_entered", "Maya came into view"),
     ("user_said", 'someone said: "Ugh, I can\'t eat this — I really hate cilantro."'),
-    ("sar_said", 'SAR said: "Noted — no cilantro fan in the house this week!"'),
+    ("sparc_said", 'SPARC said: "Noted — no cilantro fan in the house this week!"'),
     ("user_said", 'someone said: "My flight back home leaves Friday at 9 in the morning."'),
-    ("user_said", 'someone said: "SAR, remember that the spare key is under the blue flowerpot."'),
+    ("user_said", 'someone said: "SPARC, remember that the spare key is under the blue flowerpot."'),
     ("sound", "a microwave beep was heard"),
-    ("person_left", "they left SAR's view"),
+    ("person_left", "they left SPARC's view"),
     ("person_entered", "Maya came into view"),
-    ("user_said", 'someone said: "Goodnight SAR, see you tomorrow."'),
-    ("person_left", "they left SAR's view"),
+    ("user_said", 'someone said: "Goodnight SPARC, see you tomorrow."'),
+    ("person_left", "they left SPARC's view"),
 ]
 
 TARGET_FACTS = {
@@ -61,22 +61,22 @@ TARGET_FACTS = {
 
 PROBES = [
     dict(id="P1_name_greeting",
-         event="Maya just came into view and glanced at SAR",
+         event="Maya just came into view and glanced at SPARC",
          situation="Maya entered the room in the morning",
-         scene="It's Wednesday morning. SAR is in the apartment, on his stand. "
-               "A familiar guest is here, came in just now, and looked at SAR.",
+         scene="It's Wednesday morning. SPARC is in the apartment, on his stand. "
+               "A familiar guest is here, came in just now, and looked at SPARC.",
          allowed={"say"}, must_any=["maya"], must_not=["nicholas!"]),
     dict(id="P2_flight_recall",
-         event='they said: "SAR, when does my flight leave again?"',
+         event='they said: "SPARC, when does my flight leave again?"',
          situation="Maya asks when her flight leaves",
-         scene="It's Wednesday morning. SAR is in the apartment. Maya is here, "
+         scene="It's Wednesday morning. SPARC is in the apartment. Maya is here, "
                "drinking coffee near the couch.",
          allowed={"say"}, must_any=["friday"], must_not=["saturday", "sunday", "monday"],
          bonus=["9", "nine"]),
     dict(id="P3_indirect_use",
          event='they said: "I\'m making salad for Maya tonight — should I add cilantro?"',
          situation="Nicholas asks about adding cilantro to Maya's salad",
-         scene="It's Wednesday evening. SAR is in the apartment. Nicholas is here "
+         scene="It's Wednesday evening. SPARC is in the apartment. Nicholas is here "
                "(sure it's him), chopping vegetables in the kitchen.",
          allowed={"say"}, must_any=["hate", "doesn't like", "does not like", "no cilantro",
                                     "skip the cilantro", "leave it out", "avoid"],
@@ -84,7 +84,7 @@ PROBES = [
     dict(id="P4_no_fabrication",
          event='they said: "What does Maya do for work, again?"',
          situation="Nicholas asks what Maya does for work",
-         scene="It's Wednesday evening. SAR is in the apartment. Nicholas is here, "
+         scene="It's Wednesday evening. SPARC is in the apartment. Nicholas is here, "
                "relaxing on the couch.",
          allowed={"say", "ask_user"},
          must_any=["know", "didn't mention", "never said", "not sure", "no idea",
@@ -94,7 +94,7 @@ PROBES = [
     dict(id="P5_deterministic_key",
          event='they said: "Where did we put the spare key?"',
          situation="someone asks where the spare key is hidden",
-         scene="It's Thursday morning. SAR is in the apartment. Maya is here, by the door.",
+         scene="It's Thursday morning. SPARC is in the apartment. Maya is here, by the door.",
          allowed={"say"}, must_any=["blue flowerpot", "flowerpot", "flower pot"],
          must_not=["under the mat", "in the drawer"]),
 ]
@@ -110,7 +110,7 @@ def briefing(world: WorldModel, mirror: SemanticMemory, situation: str) -> str:
 
 
 def main() -> None:
-    tmp = tempfile.mkdtemp(prefix="sar_memeval_")
+    tmp = tempfile.mkdtemp(prefix="sparc_memeval_")
     world = WorldModel(f"{tmp}/world.db")
     mirror = SemanticMemory(f"{tmp}/mirror.db", EMBED_MODEL)
     client = httpx.Client(timeout=90)

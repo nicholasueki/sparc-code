@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LaunchAgent (user session): MLX needs the user's Metal/GPU context, so cortexd
+     must run as a user agent, not a system daemon. Loads at login; KeepAlive restarts
+     on crash. For fully unattended recovery after a power event, enable auto-login. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.sparc.cortexd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/tokenator/mlx312/bin/python</string>
+    <string>-m</string>
+    <string>sparc_node_c.cortexd</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/tokenator/sparc</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>packages/common:packages/node_c</string>
+    <key>SPARC_CONFIG</key>
+    <string>/Users/tokenator/sparc/config/sparc.yaml</string>
+    <key>SPARC_NODE</key>
+    <string>c</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/tokenator/Library/Logs/sparc-cortexd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/tokenator/Library/Logs/sparc-cortexd.log</string>
+</dict>
+</plist>

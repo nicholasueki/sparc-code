@@ -1,0 +1,24 @@
+[Unit]
+Description=SPARC IMX500 vision tripwire (always-on person detection)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=robot-vision
+SupplementaryGroups=video
+WorkingDirectory=/home/robot-vision/sparc
+Environment=PYTHONPATH=packages/common:packages/node_a
+Environment=SPARC_CONFIG=/home/robot-vision/sparc/config/sparc.yaml
+Environment=SPARC_NODE=a
+ExecStart=/home/robot-vision/sparc_venv/bin/python -m sparc_node_a.perception.imx500_tripwire
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=10
+StandardOutput=append:/var/log/sparc/tripwire.log
+StandardError=append:/var/log/sparc/tripwire.log
+
+[Install]
+WantedBy=multi-user.target

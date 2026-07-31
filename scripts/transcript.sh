@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Print SAR's conversation history (what was heard + what SAR said).
+# Print SPARC's conversation history (what was heard + what SPARC said).
 # Usage: scripts/transcript.sh [N]   (default: last 40 lines; N=0 for everything)
 N="${1:-40}"
-ssh robot-vision@robot-vision.local "~/sar_venv/bin/python - <<'EOF'
+ssh robot-vision@robot-vision.local "~/sparc_venv/bin/python - <<'EOF'
 import sqlite3, time
-db = sqlite3.connect('/home/robot-vision/sar_data/world.db')
+db = sqlite3.connect('/home/robot-vision/sparc_data/world.db')
 n = $N
 q = (\"SELECT ts, type, description FROM events \"
-     \"WHERE type IN ('user_said','sar_said') ORDER BY ts\")
+     \"WHERE type IN ('user_said','sparc_said') ORDER BY ts\")
 rows = db.execute(q).fetchall()
 if n:
     rows = rows[-n:]
@@ -17,7 +17,7 @@ for ts, t, desc in rows:
     if day != last_day:
         print(f'\n--- {day} ---')
         last_day = day
-    who = 'THEM ' if t == 'user_said' else 'SAR'
+    who = 'THEM ' if t == 'user_said' else 'SPARC'
     text = desc.split(': \"', 1)[-1].rstrip('\"')
     print(f\"{time.strftime('%H:%M', time.localtime(ts))} {who} {text}\")
 EOF"

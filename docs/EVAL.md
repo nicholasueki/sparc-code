@@ -37,7 +37,7 @@ forbidden strings in chosen text, latency, prompt size. Raw data: `/tmp/ornith_e
 
 ## Adopted production config (committed)
 
-- Compact persona + embodiment constraints + "prefer wait" (config/sar.yaml)
+- Compact persona + embodiment constraints + "prefer wait" (config/sparc.yaml)
 - `temperature: 0.3`, `max_options: 3` (orchestrator)
 
 ---
@@ -66,7 +66,7 @@ recall probes through the real briefing+think path. Runs on Node C
    fact, the model invented an answer *with fabricated provenance* ("you told me she's a
    graphic designer! she mentioned her studio on tuesday"). Fix: the MEMORY prompt section
    now declares itself the COMPLETE list of past knowledge ("if an answer is not here,
-   SAR does NOT know it"). Post-fix answer: "i don't actually know! i've only heard you
+   SPARC does NOT know it"). Post-fix answer: "i don't actually know! i've only heard you
    mention she's visiting." Lesson: retrieval that returns *related but non-answering*
    facts is the confabulation trigger; close the world explicitly.
 2. **Semantic dedup gap**: near-duplicates accumulated. Fix: `commit_fact` takes a

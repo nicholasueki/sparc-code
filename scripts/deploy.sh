@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy sar to node(s): scripts/deploy.sh {a|b|c|all}
+# Deploy sparc to node(s): scripts/deploy.sh {a|b|c|all}
 # Rsyncs the repo, creates the node venv (system-site-packages so hailo/picamera2
 # system libs stay importable), installs per-node deps. Portable to bash 3.2.
 set -euo pipefail
@@ -7,11 +7,11 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 node_params() {
   case "$1" in
-    a) HOST="robot-vision@robot-vision.local"; DEST="/home/robot-vision/sar"
+    a) HOST="robot-vision@robot-vision.local"; DEST="/home/robot-vision/sparc"
        REQS="pydantic paho-mqtt pyyaml httpx numpy fastapi uvicorn" ;;
-    b) HOST="robot-genai@robot-genai.local"; DEST="/home/robot-genai/sar"
+    b) HOST="robot-genai@robot-genai.local"; DEST="/home/robot-genai/sparc"
        REQS="pydantic paho-mqtt pyyaml httpx fastapi uvicorn" ;;
-    c) HOST="tokenator@10.1.215.33"; DEST="/Users/tokenator/sar"
+    c) HOST="tokenator@10.1.215.33"; DEST="/Users/tokenator/sparc"
        REQS="pydantic paho-mqtt pyyaml httpx fastapi uvicorn fastembed sqlite-vec" ;;
     *) echo "unknown node $1"; exit 1 ;;
   esac
@@ -26,8 +26,8 @@ deploy_node() {
   if [ "$1" = "c" ]; then
     ssh "$HOST" "~/.local/bin/uv pip install --python ~/mlx312/bin/python -q $REQS && echo deps-ok"
   else
-    ssh "$HOST" "python3 -m venv --system-site-packages ~/sar_venv 2>/dev/null || true; \
-                 ~/sar_venv/bin/pip install -q $REQS && echo deps-ok"
+    ssh "$HOST" "python3 -m venv --system-site-packages ~/sparc_venv 2>/dev/null || true; \
+                 ~/sparc_venv/bin/pip install -q $REQS && echo deps-ok"
   fi
   echo "== node_$1 deployed"
 }

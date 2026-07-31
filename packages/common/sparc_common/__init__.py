@@ -1,0 +1,1 @@
+"""SPARC shared package."""

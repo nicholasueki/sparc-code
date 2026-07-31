@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live fleet watcher — one terminal window, everything SAR sees/thinks/says.
+"""Live fleet watcher — one terminal window, everything SPARC sees/thinks/says.
 
 Usage (from repo root on any machine on the LAN):
     .venv/bin/python scripts/watch.py            # or any python with paho-mqtt
@@ -55,20 +55,20 @@ def on_message(client, userdata, msg):
         return
 
     t = msg.topic
-    if t == "sar/vision/tier0":
+    if t == "sparc/vision/tier0":
         delta = data.get("scene_delta")
         if delta == "periodic":
             return  # 1 Hz box refresh for face association — not an event
         n = len(data.get("detections", []))
         icon = {"new_track": "appeared", "lost_track": "left view"}.get(delta, delta)
         line("cyan", "VISION", f"person {icon} ({n} det, src={data.get('source')})")
-    elif t == "sar/audio/transcript":
+    elif t == "sparc/audio/transcript":
         line("green", "HEARD", f"\"{data.get('text', '')}\"")
-    elif t == "sar/audio/sound":
+    elif t == "sparc/audio/sound":
         line("green", "SOUND", f"{data.get('cls')} (conf {data.get('conf', 0):.2f})")
-    elif t == "sar/tts/say":
-        line("yellow", "SAR", f"{C['bold']}\"{data.get('text', '')}\"{C['reset']}")
-    elif t == "sar/debug/thought":
+    elif t == "sparc/tts/say":
+        line("yellow", "SPARC", f"{C['bold']}\"{data.get('text', '')}\"{C['reset']}")
+    elif t == "sparc/debug/thought":
         if data.get("kind") == "note":
             line("blue", "note", C["dim"] + data.get("text", "") + C["reset"])
             return
@@ -105,8 +105,8 @@ def main() -> None:
                          userdata={"raw": args.raw})
     client.on_message = on_message
     client.connect(args.host, 1883, keepalive=30)
-    client.subscribe("sar/#", qos=0)
-    print(f"{C['bold']}— watching SAR on {args.host} (Ctrl-C to quit) —{C['reset']}")
+    client.subscribe("sparc/#", qos=0)
+    print(f"{C['bold']}— watching SPARC on {args.host} (Ctrl-C to quit) —{C['reset']}")
     try:
         client.loop_forever()
     except KeyboardInterrupt:
