@@ -1,1 +1,0 @@
-"""Lucas shared package."""

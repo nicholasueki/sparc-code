@@ -1,0 +1,22 @@
+[Unit]
+Description=SAR genaid (Hailo-10H STT / selector / salience service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=robot-genai
+WorkingDirectory=/home/robot-genai/sar
+Environment=PYTHONPATH=packages/common:packages/node_b
+Environment=SAR_CONFIG=/home/robot-genai/sar/config/sar.yaml
+Environment=SAR_NODE=b
+ExecStart=/home/robot-genai/sar_venv/bin/python -m sar_node_b.genaid
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=10
+StandardOutput=append:/var/log/sar/genaid.log
+StandardError=append:/var/log/sar/genaid.log
+
+[Install]
+WantedBy=multi-user.target

@@ -6,10 +6,10 @@ ROOT = Path(__file__).resolve().parents[1]
 for pkg in ("common", "node_a", "node_c"):
     sys.path.insert(0, str(ROOT / "packages" / pkg))
 
-from lucas_common.types import ThinkRequest, OptionMeta  # noqa: E402
-from lucas_node_c import prompts  # noqa: E402
-from lucas_node_a.perception.imx500_tripwire import CentroidTracker  # noqa: E402
-from lucas_common import narrative  # noqa: E402
+from sar_common.types import ThinkRequest, OptionMeta  # noqa: E402
+from sar_node_c import prompts  # noqa: E402
+from sar_node_a.perception.imx500_tripwire import CentroidTracker  # noqa: E402
+from sar_common import narrative  # noqa: E402
 
 
 def test_parse_think_happy_path():
@@ -81,18 +81,18 @@ def test_option_to_action():
 def test_on_transcript_queues_deliberation(tmp_path, monkeypatch):
     """Regression: a transcript must BOTH ingest the event and queue a deliberation
     (a bad edit once stranded the submit() as dead code — nothing ever thought)."""
-    cfg = tmp_path / "lucas.yaml"
+    cfg = tmp_path / "sar.yaml"
     cfg.write_text(
         "bus: {host: 127.0.0.1, port: 1883}\n"
         "endpoints: {cortexd: 'http://127.0.0.1:1'}\n"  # unreachable -> fast fail paths
         f"node_a: {{db_path: {tmp_path}/world.db, think_timeout_s: 1}}\n"
     )
-    monkeypatch.setenv("LUCAS_CONFIG", str(cfg))
-    from lucas_common import config
+    monkeypatch.setenv("SAR_CONFIG", str(cfg))
+    from sar_common import config
     config.load.cache_clear()
     sys.path.insert(0, str(ROOT / "packages" / "node_a"))
-    from lucas_node_a.orchestrator import Orchestrator
-    from lucas_common.types import Transcript
+    from sar_node_a.orchestrator import Orchestrator
+    from sar_common.types import Transcript
 
     o = Orchestrator()
     o.on_transcript(Transcript(text="remember that the towels live in the hall closet"))
@@ -123,7 +123,7 @@ def test_tracker_debounce_and_merge():
 
 
 def test_person_reappearance_object_permanence(tmp_path):
-    from lucas_node_a.world_model import WorldModel
+    from sar_node_a.world_model import WorldModel
     w = WorldModel(str(tmp_path / "w.db"))
     eid1, _, _, re1 = w.person_appeared("trk_a")
     assert re1 is False
@@ -141,22 +141,22 @@ def test_camera_section_only_when_image_attached():
 
 
 def test_scene_summarizes_own_speech_keeps_others_verbatim(tmp_path):
-    """Lucas's own words never appear verbatim in the scene (self-echo guard);
+    """SAR's own words never appear verbatim in the scene (self-echo guard);
     other people's words do."""
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.deliberation import serialize_scene
+    from sar_node_a.world_model import WorldModel
+    from sar_node_a.deliberation import serialize_scene
     w = WorldModel(str(tmp_path / "w.db"))
     w.add_event("user_said", 'someone said: "I love jasmine tea"', [], 0.8)
-    w.add_event("lucas_said", 'Lucas said: "A very unique phrase xyzzy"', [], 0.4)
+    w.add_event("sar_said", 'SAR said: "A very unique phrase xyzzy"', [], 0.4)
     scene = serialize_scene(w)
     assert "jasmine tea" in scene            # others verbatim
     assert "xyzzy" not in scene              # own words summarized
-    assert "Lucas spoke to them" in scene
+    assert "SAR spoke to them" in scene
 
 
 def test_identity_merge_and_greet_wait(tmp_path):
     """Face embedding resolves a temp entity into the enrolled person."""
-    from lucas_node_a.world_model import WorldModel
+    from sar_node_a.world_model import WorldModel
     w = WorldModel(str(tmp_path / "w.db"))
     emb = [1.0] + [0.0] * 511
     known = w.enroll_face("Nicholas", emb)
@@ -169,7 +169,7 @@ def test_identity_merge_and_greet_wait(tmp_path):
 
 
 def test_scrfd_decode_shapes():
-    from lucas_node_a.perception.face_enrich import decode_scrfd, SCRFD_BRANCHES
+    from sar_node_a.perception.face_enrich import decode_scrfd, SCRFD_BRANCHES
     import numpy as np
     outs = {}
     for stride, (s, b, k) in SCRFD_BRANCHES.items():
@@ -188,9 +188,9 @@ def test_scrfd_decode_shapes():
 
 def test_enroll_face_validation_and_commit(tmp_path):
     """enroll_face: vetoed without samples/valid name; commits with them."""
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.deliberation import Deliberation, validate
-    from lucas_common.types import Action
+    from sar_node_a.world_model import WorldModel
+    from sar_node_a.deliberation import Deliberation, validate
+    from sar_common.types import Action
     w = WorldModel(str(tmp_path / "w.db"))
     eid, *_ = w.person_appeared("trk_m")
     d = Deliberation(event_type="person_speaks", trigger_desc="x", entity_ids=[eid])
@@ -212,7 +212,7 @@ def test_enroll_face_validation_and_commit(tmp_path):
 
 
 def test_storable_fact_rejects_nonfacts():
-    from lucas_node_a.orchestrator import _is_storable_fact
+    from sar_node_a.orchestrator import _is_storable_fact
     assert _is_storable_fact("that I like jasmine tea")
     assert _is_storable_fact("my name is Nicholas")
     assert not _is_storable_fact("my face")          # enrollment intent
@@ -222,23 +222,23 @@ def test_storable_fact_rejects_nonfacts():
 
 
 def test_recent_notable_excludes_presence_churn(tmp_path):
-    from lucas_node_a.world_model import WorldModel
+    from sar_node_a.world_model import WorldModel
     w = WorldModel(str(tmp_path / "w.db"))
     w.add_event("person_entered", "someone new came into view", [], 0.7)
-    w.add_event("person_left", "they left Lucas's view", [], 0.3)
-    w.add_event("person_left", "they left Lucas's view", [], 0.3)  # dup
+    w.add_event("person_left", "they left SAR's view", [], 0.3)
+    w.add_event("person_left", "they left SAR's view", [], 0.3)  # dup
     w.add_event("user_said", 'someone said: "hello there"', [], 0.8)
     notable = w.recent_notable_events(3)
     descs = [d for _, _, d in notable]
     assert any("hello there" in d for d in descs)
-    assert not any("left Lucas" in d for d in descs)      # presence churn gone
+    assert not any("left SAR" in d for d in descs)      # presence churn gone
     assert not any("came into view" in d for d in descs)
 
 
 def test_scene_states_face_not_saved_for_unknown(tmp_path):
     """Scene must tell the model the truth: unknown person's face isn't saved."""
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.deliberation import serialize_scene
+    from sar_node_a.world_model import WorldModel
+    from sar_node_a.deliberation import serialize_scene
     w = WorldModel(str(tmp_path / "w.db"))
     eid, *_ = w.person_appeared("trk_z")
     scene = serialize_scene(w)
@@ -250,7 +250,7 @@ def test_scene_states_face_not_saved_for_unknown(tmp_path):
 
 
 def test_face_buffer_survives_presence_churn(tmp_path):
-    from lucas_node_a.world_model import WorldModel
+    from sar_node_a.world_model import WorldModel
     w = WorldModel(str(tmp_path / "w.db"))
     eid, *_ = w.person_appeared("trk_a")
     for _ in range(4):
@@ -260,7 +260,7 @@ def test_face_buffer_survives_presence_churn(tmp_path):
 
 
 def test_face_track_association():
-    from lucas_node_a.perception.face_enrich import match_face_to_track
+    from sar_node_a.perception.face_enrich import match_face_to_track
     boxes = {"near": (0.4, 0.2, 0.7, 0.95), "far": (0.35, 0.3, 0.8, 1.0),
              "other": (0.0, 0.1, 0.25, 0.9)}
     # face center inside both 'near' and 'far' -> smallest box wins
@@ -271,9 +271,9 @@ def test_face_track_association():
 
 def test_enroll_allowed_with_known_person_present(tmp_path):
     """v0.5: enrolling the one unknown works even while a known person is in view."""
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.deliberation import Deliberation, validate
-    from lucas_common.types import Action
+    from sar_node_a.world_model import WorldModel
+    from sar_node_a.deliberation import Deliberation, validate
+    from sar_common.types import Action
     w = WorldModel(str(tmp_path / "w.db"))
     w.enroll_face("Nicholas", [1.0] + [0.0] * 511)
     # Nicholas present (known) + one stranger

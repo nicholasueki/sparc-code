@@ -1,0 +1,23 @@
+[Unit]
+Description=SAR face-identity enrichment (Hailo-8 SCRFD + ArcFace)
+After=network-online.target mosquitto.service sar-tripwire.service
+Wants=network-online.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=robot-vision
+WorkingDirectory=/home/robot-vision/sar
+Environment=PYTHONPATH=packages/common:packages/node_a
+Environment=SAR_CONFIG=/home/robot-vision/sar/config/sar.yaml
+Environment=SAR_NODE=a
+ExecStart=/home/robot-vision/sar_venv/bin/python -m sar_node_a.perception.face_enrich
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=10
+StandardOutput=append:/var/log/sar/enrich.log
+StandardError=append:/var/log/sar/enrich.log
+
+[Install]
+WantedBy=multi-user.target

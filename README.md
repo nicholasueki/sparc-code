@@ -1,18 +1,18 @@
-# Lucas — MVP Implementation
+# SAR — MVP Implementation
 
-Monorepo for the Lucas companion robot MVP. Design docs live one level up
-(`Lucas_System_Design_v2.md`, `MVP_System_Design.md`, `Hardware_Audit_and_Design_v3.md`,
+Monorepo for the SAR companion robot MVP. Design docs live one level up
+(`SAR_System_Design_v2.md`, `MVP_System_Design.md`, `Hardware_Audit_and_Design_v3.md`,
 `Model_Selection_Plan.md`). This README records only what the *code* does and the
 executive decisions taken during implementation.
 
 ## Layout
 
 ```
-packages/common/lucas_common/   shared Pydantic types, config loader, MQTT bus, narrative time
-packages/node_a/lucas_node_a/   orchestrator: world model, scheduler, perception, pipelines (vision Pi)
-packages/node_b/lucas_node_b/   genaid: STT/select/salience on hailo_platform.genai + audio I/O (genai Pi)
-packages/node_c/lucas_node_c/   cortexd: Ornith backend(s), /think, semantic memory (M1 Max)
-config/lucas.yaml               single source of runtime config (per-node sections)
+packages/common/sar_common/   shared Pydantic types, config loader, MQTT bus, narrative time
+packages/node_a/sar_node_a/   orchestrator: world model, scheduler, perception, pipelines (vision Pi)
+packages/node_b/sar_node_b/   genaid: STT/select/salience on hailo_platform.genai + audio I/O (genai Pi)
+packages/node_c/sar_node_c/   cortexd: Ornith backend(s), /think, semantic memory (M1 Max)
+config/sar.yaml               single source of runtime config (per-node sections)
 scripts/                        deploy + run helpers (rsync, systemd units)
 tests/                          fixture-driven unit tests (no hardware needed)
 ```
@@ -23,7 +23,7 @@ tests/                          fixture-driven unit tests (no hardware needed)
    RPi OS Trixie (Debian 13). Mosquitto + paho is apt-installable, ~1 ms on LAN,
    QoS 1, retained messages for state topics. All messages remain typed Pydantic
    models serialized as JSON — the boundary types are the contract, so a future
-   ROS 2/zenoh migration touches only `lucas_common/bus.py`.
+   ROS 2/zenoh migration touches only `sar_common/bus.py`.
 2. **cortexd model backend = in-process mlx-vlm (`MLXBackend`), primary.**
    Measured on the M1 Max: 58 tok/s decode, 26 GB peak. LM Studio's bundled MLX
    engine cannot load Ornith yet (`qwen3_5_moe_vision` unsupported); pip mlx-vlm
@@ -37,15 +37,15 @@ tests/                          fixture-driven unit tests (no hardware needed)
    Small, no torch, ~10 ms/text. Vector store = sqlite-vec on Node C. Canonical
    facts live on Node A (SQLite); Node C holds the embedding mirror (design §7.1).
 5. **Audio is optional at boot.** genaid + orchestrator run without mic/speaker;
-   `say` actions fall back to log lines (and MQTT `lucas/tts/say` for whenever a
+   `say` actions fall back to log lines (and MQTT `sar/tts/say` for whenever a
    speaker exists). Piper/Silero wire in without code changes when hardware arrives.
 6. **10H models:** v5.2.0 zoo HEFs verified working on the HailoRT 5.1.1 runtime
    (Qwen2.5-1.5B generates). Letter-selector protocol per v3 §U2.
 
 ## Runbook
 
-- Node A: `python -m lucas_node_a.orchestrator` (needs mosquitto running locally)
-- Node B: `python -m lucas_node_b.genaid`
-- Node C: `python -m lucas_node_c.cortexd`
+- Node A: `python -m sar_node_a.orchestrator` (needs mosquitto running locally)
+- Node B: `python -m sar_node_b.genaid`
+- Node C: `python -m sar_node_c.cortexd`
 - Deploy: `scripts/deploy.sh {a|b|c|all}` (rsync to the node, restart systemd unit)
 - Tests: `pytest tests/` from repo root (pure-Python, hardware mocked by fixtures)

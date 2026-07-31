@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Enroll a face: stand in front of the camera, run this ON the vision Pi.
 
-    ~/lucas_venv/bin/python scripts/enroll.py --name Nicholas
+    ~/sar_venv/bin/python scripts/enroll.py --name Nicholas
 
-Collects N face embeddings from the live enrichment stream (lucas/vision/rich),
+Collects N face embeddings from the live enrichment stream (sar/vision/rich),
 averages them, and stores ONE 512-number vector under the given name.
 No images are captured or stored by enrollment — only the vector.
 """
@@ -20,10 +20,10 @@ for pkg in ("common", "node_a"):
 
 import numpy as np  # noqa: E402
 
-from lucas_common import config  # noqa: E402
-from lucas_common.bus import Bus  # noqa: E402
-from lucas_common.types import DetectionFrame  # noqa: E402
-from lucas_node_a.world_model import WorldModel  # noqa: E402
+from sar_common import config  # noqa: E402
+from sar_common.bus import Bus  # noqa: E402
+from sar_common.types import DetectionFrame  # noqa: E402
+from sar_node_a.world_model import WorldModel  # noqa: E402
 
 
 def main() -> None:
@@ -42,7 +42,7 @@ def main() -> None:
                 print(f"  sample {len(collected)}/{args.samples} (det conf {det.conf:.2f})")
 
     bus = Bus(client_id="enroll")
-    bus.subscribe("lucas/vision/rich", DetectionFrame, on_rich)
+    bus.subscribe("sar/vision/rich", DetectionFrame, on_rich)
     bus.start()
     print(f"Look at the camera, {args.name} — collecting {args.samples} samples...")
     deadline = time.time() + args.timeout
