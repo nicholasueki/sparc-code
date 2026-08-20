@@ -1,0 +1,10 @@
+# Local Python environment — rebuilt from the dependency manifest, never committed.
+.venv/
+__pycache__/
+*.pyc
+
+# Evolution harness run state (genomes, ledger, per-run JSON) — reproducible output.
+evolution_runs/
+
+# macOS
+.DS_Store
