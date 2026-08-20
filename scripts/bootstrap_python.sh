@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install one Lucas dependency group from its complete hash-locked graph.
+# Install one SPARC dependency group from its complete hash-locked graph.
 # Usage: PYTHON=/path/to/python scripts/bootstrap_python.sh {dev|node-a|node-b|node-c}
 set -euo pipefail
 
@@ -30,13 +30,13 @@ case "$TARGET" in
     require_python 3.12
     ;;
   node-a)
-    PYTHON="${PYTHON:-$HOME/lucas_venv/bin/python}"
+    PYTHON="${PYTHON:-$HOME/sparc_venv/bin/python}"
     LOCK="$REPO/locks/node-a-debian13-arm64-py313.txt"
     [ -x "$PYTHON" ] || fail "Python interpreter is not executable: $PYTHON"
     require_python 3.13
     ;;
   node-b)
-    PYTHON="${PYTHON:-$HOME/lucas_venv/bin/python}"
+    PYTHON="${PYTHON:-$HOME/sparc_venv/bin/python}"
     LOCK="$REPO/locks/node-b-debian13-arm64-py313.txt"
     [ -x "$PYTHON" ] || fail "Python interpreter is not executable: $PYTHON"
     require_python 3.13

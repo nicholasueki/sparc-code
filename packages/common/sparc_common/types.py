@@ -27,7 +27,7 @@ class Msg(BaseModel):
 
 
 class ServiceHealth(Msg):
-    """Retained functional readiness for one long-running Lucas service."""
+    """Retained functional readiness for one long-running SPARC service."""
 
     service: Literal["orchestrator", "tripwire", "enrich", "earsd"]
     status: Literal["starting", "ready", "degraded", "failed", "stopping"]

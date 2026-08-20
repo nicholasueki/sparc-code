@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "node_c"))
 
-from lucas_node_c import backends  # noqa: E402
+from sparc_node_c import backends  # noqa: E402
 
 
 IMAGE_B64 = base64.b64encode(b"jpeg bytes").decode()
@@ -127,7 +127,7 @@ def test_mlx_unlink_failure_is_logged_without_masking_success(
     monkeypatch.setattr(backends, "unlink", fail_unlink)
     backend = _backend()
 
-    with caplog.at_level(logging.ERROR, logger="lucas.backend"):
+    with caplog.at_level(logging.ERROR, logger="sparc.backend"):
         assert backend.generate("system", "user", IMAGE_B64) == "answer"
 
     temp_file = opened_temp_files[0]
@@ -151,7 +151,7 @@ def test_mlx_unlink_failure_is_logged_without_masking_generation_failure(
     monkeypatch.setattr(backends, "unlink", fail_unlink)
     backend = _backend(generate=fail_generation)
 
-    with caplog.at_level(logging.ERROR, logger="lucas.backend"):
+    with caplog.at_level(logging.ERROR, logger="sparc.backend"):
         with pytest.raises(RuntimeError) as raised:
             backend.generate("system", "user", IMAGE_B64)
 

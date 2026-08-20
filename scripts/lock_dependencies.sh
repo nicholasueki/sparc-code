@@ -29,7 +29,7 @@ compile_group() {
     --only-binary :all: \
     --generate-hashes \
     --exclude-newer "$EXCLUDE_NEWER" \
-    --no-emit-package lucas-robot \
+    --no-emit-package sparc-robot \
     --custom-compile-command scripts/lock_dependencies.sh \
     --upgrade \
     --output-file "$output"
@@ -67,8 +67,8 @@ MACOSX_DEPLOYMENT_TARGET=14.0 compile_group \
 
 # The dev lock supports both macOS architectures only while they resolve to the
 # same exact graph. Hash generation includes distributions for both.
-dev_arm=$(mktemp "${TMPDIR:-/tmp}/lucas-dev-arm.XXXXXX")
-dev_x86=$(mktemp "${TMPDIR:-/tmp}/lucas-dev-x86.XXXXXX")
+dev_arm=$(mktemp "${TMPDIR:-/tmp}/sparc-dev-arm.XXXXXX")
+dev_x86=$(mktemp "${TMPDIR:-/tmp}/sparc-dev-x86.XXXXXX")
 cleanup() { rm -f "$dev_arm" "$dev_x86"; }
 trap cleanup EXIT
 for spec in "aarch64-apple-darwin:$dev_arm" "x86_64-apple-darwin:$dev_x86"; do
@@ -81,7 +81,7 @@ for spec in "aarch64-apple-darwin:$dev_arm" "x86_64-apple-darwin:$dev_x86"; do
     --python-platform "$platform" \
     --only-binary :all: \
     --exclude-newer "$EXCLUDE_NEWER" \
-    --no-emit-package lucas-robot \
+    --no-emit-package sparc-robot \
     --no-annotate \
     --no-header \
     --upgrade \

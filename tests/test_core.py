@@ -372,9 +372,9 @@ def test_enabled_motion_without_executor_is_vetoed_and_not_traced_executed(
 def test_motion_fallback_survives_debug_telemetry_failure(
     tmp_path, motion_config
 ):
-    from lucas_node_a.deliberation import Deliberation, Stage
-    from lucas_node_a.orchestrator import Orchestrator
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import Deliberation, Stage
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
 
     class RaisingBus:
         def publish_json(self, *args, **kwargs):
@@ -437,8 +437,8 @@ def test_enroll_allowed_with_known_person_present(tmp_path):
 def test_fresh_face_evidence_has_conservative_states(tmp_path):
     """Transition rows: no face, positive, uncertain, and below-threshold."""
     import math
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.deliberation import serialize_scene
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import serialize_scene
 
     w = WorldModel(str(tmp_path / "w.db"))
     nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -459,7 +459,7 @@ def test_fresh_face_evidence_has_conservative_states(tmp_path):
     uncertain, name, state, _ = w.person_appeared("uncertain", uncertain_vec)
     assert uncertain != nicholas and name is None and state == "uncertain"
     scene = serialize_scene(w)
-    assert "identity Lucas is uncertain about" in scene
+    assert "identity SPARC is uncertain about" in scene
     assert "Nicholas" not in scene
     w.person_left("uncertain")
 
@@ -470,8 +470,8 @@ def test_fresh_face_evidence_has_conservative_states(tmp_path):
 
 def test_timestamp_reappearance_never_reuses_enrollment(tmp_path):
     """Transition rows: timestamp continuity is anonymous-only."""
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.deliberation import serialize_scene
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import serialize_scene
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -492,7 +492,7 @@ def test_timestamp_reappearance_never_reuses_enrollment(tmp_path):
 
 def test_known_confirmation_clears_contradiction_and_no_face_retains_binding(tmp_path):
     """Transition rows: contradiction clears on confirmation; no-face is inert."""
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -512,7 +512,7 @@ def test_known_confirmation_clears_contradiction_and_no_face_retains_binding(tmp
 
 def test_two_consistent_other_known_samples_rebind(tmp_path):
     """Transition row: a different enrollment needs two consistent positives."""
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -533,9 +533,9 @@ def test_two_consistent_other_known_samples_rebind(tmp_path):
 def test_uncertain_live_known_suppresses_scene_and_named_greeting(tmp_path):
     """Uncertain evidence retains enrollment but forbids named presentation."""
     import math
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.deliberation import Deliberation, serialize_scene, validate
-    from lucas_common.types import Action
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import Deliberation, serialize_scene, validate
+    from sparc_common.types import Action
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -546,7 +546,7 @@ def test_uncertain_live_known_suppresses_scene_and_named_greeting(tmp_path):
     assert "Nicholas" in w.known_names()  # durable enrollment remains
 
     scene = serialize_scene(w)
-    assert "identity Lucas is uncertain about" in scene
+    assert "identity SPARC is uncertain about" in scene
     assert "Nicholas" not in scene
     d = Deliberation(
         event_type="person_enters", trigger_desc="arrival", entity_ids=[known])
@@ -560,7 +560,7 @@ def test_uncertain_live_known_suppresses_scene_and_named_greeting(tmp_path):
 def test_three_stable_high_quality_negatives_split_without_corruption(tmp_path):
     """Three strong negatives move only the live presentation and its evidence."""
     import json
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -598,7 +598,7 @@ def test_three_stable_high_quality_negatives_split_without_corruption(tmp_path):
 
 def test_negative_split_requires_detection_quality_and_embedding_agreement(tmp_path):
     """Low-confidence or mutually-inconsistent negatives cannot force a split."""
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0, 0.0])
@@ -619,7 +619,7 @@ def test_negative_split_requires_detection_quality_and_embedding_agreement(tmp_p
 
 
 def test_identity_transition_trace_records_evidence_and_entities(tmp_path):
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -639,9 +639,9 @@ def test_identity_transition_trace_records_evidence_and_entities(tmp_path):
 def test_orchestrator_split_schedules_one_unnamed_greeting(tmp_path):
     """A corrected anonymous arrival is handed to the generic greeting path."""
     import time
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.orchestrator import Orchestrator
-    from lucas_common.types import Detection, DetectionFrame
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_common.types import Detection, DetectionFrame
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -676,9 +676,9 @@ def test_orchestrator_split_schedules_one_unnamed_greeting(tmp_path):
 
 
 def test_anonymous_tracker_flap_does_not_schedule_second_greeting(tmp_path):
-    from lucas_node_a.world_model import WorldModel
-    from lucas_node_a.orchestrator import Orchestrator
-    from lucas_common.types import Detection, DetectionFrame
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_common.types import Detection, DetectionFrame
 
     class FakeBus:
         def publish_json(self, *_args, **_kwargs):
@@ -717,9 +717,9 @@ def test_anonymous_tracker_flap_does_not_schedule_second_greeting(tmp_path):
 def test_anonymous_arrival_replaces_ungrounded_name_with_generic_greeting(
         tmp_path, requested):
     """Absent enrollment and arbitrary prose are never executable identities."""
-    from lucas_node_a.deliberation import Deliberation, validate
-    from lucas_node_a.orchestrator import Orchestrator
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import Deliberation, validate
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
 
     class RecordingBus:
         def __init__(self):
@@ -759,9 +759,9 @@ def test_anonymous_arrival_replaces_ungrounded_name_with_generic_greeting(
 
 
 def test_confirmed_target_gets_only_its_grounded_named_greeting(tmp_path):
-    from lucas_node_a.deliberation import Deliberation, validate
-    from lucas_node_a.orchestrator import Orchestrator
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import Deliberation, validate
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
 
     class RecordingBus:
         def __init__(self):
@@ -793,8 +793,8 @@ def test_confirmed_target_gets_only_its_grounded_named_greeting(tmp_path):
 
 
 def test_anonymous_bind_conflict_preserves_incumbent_and_source(tmp_path):
-    from lucas_node_a.deliberation import serialize_scene
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import serialize_scene
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -814,7 +814,7 @@ def test_anonymous_bind_conflict_preserves_incumbent_and_source(tmp_path):
     assert w.face_samples(known) == [[1.0, 0.0, 0.0]]
     assert w.face_samples(source) == [[0.0, 0.0, 1.0]]
     assert "Nicholas" in serialize_scene(w)
-    assert "identity Lucas is uncertain about" in serialize_scene(w)
+    assert "identity SPARC is uncertain about" in serialize_scene(w)
     assert json.loads(w.db.execute(
         "SELECT entity_ids FROM events WHERE id=?", (old_event,)).fetchone()[0]
     ) == [source]
@@ -834,8 +834,8 @@ def test_anonymous_bind_conflict_preserves_incumbent_and_source(tmp_path):
 
 
 def test_known_rebind_conflict_preserves_both_tracks_and_later_leaves(tmp_path):
-    from lucas_node_a.deliberation import serialize_scene
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import serialize_scene
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
@@ -858,7 +858,7 @@ def test_known_rebind_conflict_preserves_both_tracks_and_later_leaves(tmp_path):
     assert w.face_samples(nicholas) == [[1.0, 0.0, 0.0]]
     assert w.face_samples(maya) == [[0.0, 1.0, 0.0]]
     scene = serialize_scene(w)
-    assert "identity Lucas is uncertain about" in scene and "Maya" in scene
+    assert "identity SPARC is uncertain about" in scene and "Maya" in scene
     assert json.loads(w.db.execute(
         "SELECT entity_ids FROM events WHERE id=?", (event,)).fetchone()[0]
     ) == [nicholas, maya]
@@ -877,7 +877,7 @@ def test_known_rebind_conflict_preserves_both_tracks_and_later_leaves(tmp_path):
 
 
 def test_direct_positive_arrival_cannot_claim_already_live_enrollment(tmp_path):
-    from lucas_node_a.world_model import WorldModel
+    from sparc_node_a.world_model import WorldModel
 
     w = WorldModel(str(tmp_path / "w.db"))
     known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])

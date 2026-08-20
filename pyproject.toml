@@ -3,9 +3,9 @@ requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lucas-robot"
+name = "sparc-robot"
 version = "0.1.0"
-description = "Local services for the Lucas companion robot"
+description = "Local services for the SPARC companion robot"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [

@@ -376,14 +376,14 @@ fastapi==0.139.0 \
     --hash=sha256:cf15e1e9e667ddb0ad63811e60bd11390d1aac838ca4a7a23f421807b2308189
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
     #   mlx-vlm
 fastembed==0.8.0 \
     --hash=sha256:40bee672657574a1009e35ec50030a55f2b426842cb011845379817641bbbbd0 \
     --hash=sha256:75966edfa8b006ee78514c726bd7f6a50721dadc89305279052be9db72fd53e8
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
 filelock==3.29.7 \
     --hash=sha256:5b481979797ae69e72f0b389d89a80bdd585c260c5b3f1fb9c0a5ba9bb3f195d \
     --hash=sha256:987db6f789a3a2a59f55081801b2b3697cb97e2a736b5f1a9e99b559285fbc51
@@ -577,7 +577,7 @@ httpx==0.28.1 \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
     # via
     #   -c constraints.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
     #   datasets
     #   huggingface-hub
 huggingface-hub==1.23.0 \
@@ -849,12 +849,12 @@ mlx-vlm==0.6.3 \
     --hash=sha256:f5541eb7c22345a951f7fb78376ed80e8e42bd7c179fb0daa40a21592c7b2adb
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
 mlx-whisper==0.4.3 \
     --hash=sha256:6b82b6597a994643a3e5496c7bc229a672e5ca308458455bfe276e76ae024489
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
 mmh3==5.2.1 \
     --hash=sha256:022aa1a528604e6c83d0a7705fdef0b5355d897a9e0fa3a8d26709ceaa06965d \
     --hash=sha256:0634581290e6714c068f4aa24020acf7880927d1f0084fa753d9799ae9610082 \
@@ -1248,7 +1248,7 @@ numpy==2.3.5 \
     --hash=sha256:fffe29a1ef00883599d1dc2c51aa2e5d80afe49523c261a74933df395c15c520
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
     #   datasets
     #   fastembed
     #   mlx-audio
@@ -1311,7 +1311,7 @@ paho-mqtt==2.1.0 \
     --hash=sha256:6db9ba9b34ed5bc6b6e3812718c7e06e2fd7444540df2455d2c51bd58808feee
     # via
     #   -c constraints.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
 pandas==3.0.3 \
     --hash=sha256:0383c72c75cdcca61a9e116e611143902dbfd08bff356829c2f6d1cf40a9ca8c \
     --hash=sha256:05f1f1752b8533ea03f7f39a9c15b1a058d067bb48f4748948e7a8691e0510f2 \
@@ -1701,7 +1701,7 @@ pydantic==2.13.4 \
     --hash=sha256:c40756b57adaa8b1efeeced5c196f3f3b7c435f90e84ea7f443901bec8099ef6
     # via
     #   -c constraints.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
     #   fastapi
 pydantic-core==2.46.4 \
     --hash=sha256:00c603d540afdd6b80eb39f078f33ebd46211f02f33e34a32d9f053bba711de0 \
@@ -1909,7 +1909,7 @@ pyyaml==6.0.3 \
     --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
     # via
     #   -c constraints.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
     #   datasets
     #   huggingface-hub
     #   mlx-lm
@@ -2188,7 +2188,7 @@ sounddevice==0.5.5 \
     --hash=sha256:cfc6b2c49fb7f555591c78cb8ecf48d6a637fd5b6e1db5fec6ed9365d64b3519
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
     #   mlx-audio
 sqlite-vec==0.1.9 \
     --hash=sha256:1515727990b49e79bcaf75fdee2ffc7d461f8b66905013231251f1c8938e7786 \
@@ -2198,7 +2198,7 @@ sqlite-vec==0.1.9 \
     --hash=sha256:4e921e592f24a5f9a18f590b6ddd530eb637e2d474e3b1972f9bbeb773aa3cb9
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
 starlette==1.3.1 \
     --hash=sha256:05d0213193f2fbaae60e2ecb593b4add4262ad4e46536b54abe36f11a71724e0 \
     --hash=sha256:c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6
@@ -2374,7 +2374,7 @@ uvicorn==0.51.0 \
     --hash=sha256:f6f4b69b657c312f516dd2d268ab9ae6f254b11e4bac504f37b2ab58b24dd0b0
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
     #   mlx-vlm
 webrtcvad-wheels==2.0.14 \
     --hash=sha256:04e47b87bf673098f25e2c2e07e486b58a339a93231ee0021a86a92b3b759b89 \
@@ -2497,7 +2497,7 @@ webrtcvad-wheels==2.0.14 \
     --hash=sha256:ff2a7eb4fe2189a7766726d6122b319df3e727c4cfed86409e2802fed1b459d3
     # via
     #   -c constraints-node-c.txt
-    #   lucas-robot (pyproject.toml)
+    #   sparc-robot (pyproject.toml)
 xxhash==3.8.1 \
     --hash=sha256:000435984a0469b0f822fe76f35bddea0f96a4d6521b3339a60a6428cdee1edc \
     --hash=sha256:00de40f3b42240db23a82a5c682b55d7263d84a26a953240c1aee463409660e3 \

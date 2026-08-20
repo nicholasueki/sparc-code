@@ -1,6 +1,6 @@
 # Reproducible Python bootstrap
 
-Lucas keeps readable direct dependency groups in `pyproject.toml` and installs
+SPARC keeps readable direct dependency groups in `pyproject.toml` and installs
 complete generated locks from `locks/`. Every package in a runtime lock is exact
 and hash-checked; vendor libraries, OS packages, and model assets stay external.
 
@@ -13,7 +13,7 @@ and hash-checked; vendor libraries, OS packages, and model assets stay external.
 
 `scripts/bootstrap_python.sh` first installs the hash-locked packaging toolchain
 from `locks/bootstrap.txt` (`pip==26.1.2`, `setuptools==83.0.0`,
-`wheel==0.47.0`), then the selected runtime lock, then Lucas itself with no
+`wheel==0.47.0`), then the selected runtime lock, then SPARC itself with no
 dependency resolution and no isolated build environment.
 
 ## Developer/test bootstrap
@@ -24,7 +24,7 @@ From a clean checkout on macOS with Python 3.12:
 python3.12 -m venv .venv
 scripts/bootstrap_python.sh dev
 .venv/bin/python -m pytest
-.venv/bin/python -c 'import lucas_common, lucas_node_a, lucas_node_b, lucas_node_c'
+.venv/bin/python -c 'import sparc_common, sparc_node_a, sparc_node_b, sparc_node_c'
 ```
 
 The bootstrap fails if the host is not macOS or the interpreter is not Python
@@ -37,9 +37,9 @@ and the matching HailoRT `hailo_platform` package. These stay outside pip and ar
 visible through the system-site venv:
 
 ```bash
-python3 -m venv --system-site-packages ~/lucas_venv
-PYTHON="$HOME/lucas_venv/bin/python" scripts/bootstrap_python.sh node-a
-~/lucas_venv/bin/python -c 'import lucas_node_a.orchestrator; import lucas_node_a.perception.imx500_tripwire; import lucas_node_a.perception.face_enrich'
+python3 -m venv --system-site-packages ~/sparc_venv
+PYTHON="$HOME/sparc_venv/bin/python" scripts/bootstrap_python.sh node-a
+~/sparc_venv/bin/python -c 'import sparc_node_a.orchestrator; import sparc_node_a.perception.imx500_tripwire; import sparc_node_a.perception.face_enrich'
 ```
 
 ## Node B
@@ -48,9 +48,9 @@ Install the vendor HailoRT release providing `hailo_platform` and
 `hailo_platform.genai`, and provision the configured LLM/Whisper HEFs externally:
 
 ```bash
-python3 -m venv --system-site-packages ~/lucas_venv
-PYTHON="$HOME/lucas_venv/bin/python" scripts/bootstrap_python.sh node-b
-~/lucas_venv/bin/python -c 'import lucas_node_b.genaid as g; assert g.health()["ok"]'
+python3 -m venv --system-site-packages ~/sparc_venv
+PYTHON="$HOME/sparc_venv/bin/python" scripts/bootstrap_python.sh node-b
+~/sparc_venv/bin/python -c 'import sparc_node_b.genaid as g; assert g.health()["ok"]'
 ```
 
 ## Node C
@@ -62,13 +62,13 @@ before installing anything and emits a clear error if the contract is not met:
 
 ```bash
 PYTHON="$HOME/mlx312/bin/python" scripts/bootstrap_python.sh node-c
-~/mlx312/bin/python -c 'import lucas_node_c.cortexd as c; assert c.health()["ok"] is False'
-~/mlx312/bin/python -c 'import lucas_node_c.earsd'
+~/mlx312/bin/python -c 'import sparc_node_c.cortexd as c; assert c.health()["ok"] is False'
+~/mlx312/bin/python -c 'import sparc_node_c.earsd'
 ```
 
 The Node C lock includes MLX VLM and local Whisper libraries, not model weights:
 
-- Ornith/MLX VLM: `node_c.mlx.model_path` in `config/lucas.yaml`.
+- Ornith/MLX VLM: `node_c.mlx.model_path` in `config/sparc.yaml`.
 - Local Whisper fallback: `node_c.ears.mlx_whisper_model`, cached outside Git.
 - Node B Hailo models: `node_b.hef_dir`, `node_b.llm_hef`, and `node_b.stt_hef`.
 - Node A Hailo HEFs and IMX500 `.rpk`: OS/vendor paths in source/config.
