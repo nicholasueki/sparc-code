@@ -157,8 +157,10 @@ class ThinkRequest(BaseModel):
     max_options: int = 5
     motion: bool = False  # offer motion intents in the action menu
     # experiment overrides (eval harness only; None = use config defaults)
-    persona_override: Optional[str] = None
+    persona_override: Optional[str] = None          # gene G0
     temperature_override: Optional[float] = None
+    memory_header_override: Optional[str] = None    # gene G1 ('{memory}' placeholder)
+    empty_header_override: Optional[str] = None     # gene G2
 
 
 class ThinkResponse(BaseModel):

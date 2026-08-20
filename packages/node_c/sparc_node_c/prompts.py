@@ -10,9 +10,28 @@ import json
 import logging
 import re
 
+from sparc_common import config
 from sparc_common.types import Action, OptionMeta, OptionSet, ThinkRequest
 
 log = logging.getLogger("sparc.prompts")
+
+# Memory prompt genes live in config (personality/memory_prompts) so the evolution
+# harness can vary them per-request without editing source. The literals here are
+# the last-resort fallback when the config section is absent.
+_FALLBACK_BRIEFING_HEADER = (
+    "MEMORY (the COMPLETE list of what SPARC knows from the past — if an "
+    "answer is not here or in CONVERSATION, SPARC does NOT know it and says so): {memory}"
+)
+_FALLBACK_EMPTY_HEADER = (
+    "MEMORY: (empty — SPARC has no stored knowledge; he must not claim to "
+    "remember anything)"
+)
+
+
+def _render_memory(template: str, memory: str) -> str:
+    """Substitute the briefing. Plain replace, not str.format — genome text may
+    contain JSON braces, and a stray brace must never raise."""
+    return template.replace("{memory}", memory)
 
 THINK_TASK = """\
 TASK: You are deciding SPARC's next move. Propose {max_options} DISTINCT candidate \
@@ -39,15 +58,12 @@ MOTION_ACTIONS = BASE_ACTIONS + ", look_at, approach, back_up, stop_moving"
 def build_think_user(req: ThinkRequest) -> str:
     parts = [f"SCENE: {req.scene}"]
     if req.memory:
-        parts.append(
-            "MEMORY (the COMPLETE list of what SPARC knows from the past — if an "
-            f"answer is not here or in CONVERSATION, SPARC does NOT know it and says so): {req.memory}"
-        )
+        header = req.memory_header_override or config.get(
+            "memory_prompts.briefing_header", _FALLBACK_BRIEFING_HEADER)
+        parts.append(_render_memory(header, req.memory))
     else:
-        parts.append(
-            "MEMORY: (empty — SPARC has no stored knowledge; he must not claim to "
-            "remember anything)"
-        )
+        parts.append(req.empty_header_override or config.get(
+            "memory_prompts.empty_header", _FALLBACK_EMPTY_HEADER))
     if req.conversation:
         turns = "\n".join(f"{t['role']}: {t['text']}" for t in req.conversation[-12:])
         parts.append(f"CONVERSATION:\n{turns}")
@@ -161,6 +177,11 @@ def option_to_action(opt: OptionMeta, why: str, fallback_level: int = 0) -> Acti
 DISTILL_SYSTEM = """You extract durable facts about people and the home from an \
 event log. Only facts likely true next week. Reply ONLY with JSON: \
 {"proposals":[{"statement":"...","kind":"fact|preference|habit","confidence":0.0}]}"""
+
+
+def distill_system(override: str | None = None) -> str:
+    """Gene G3. override (eval harness) > config > module fallback."""
+    return override or config.get("memory_prompts.distill_system", DISTILL_SYSTEM)
 
 
 VLM_SYSTEM = """You answer questions about a camera image with structured data. \

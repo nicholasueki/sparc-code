@@ -175,13 +175,15 @@ def embed(req: EmbedRequest) -> dict:
 
 class DistillRequest(BaseModel):
     episodes: list[str]
+    system_override: str | None = None  # gene G3 (eval harness only)
 
 
 @app.post("/distill")
 def distill(req: DistillRequest) -> dict:
     _queue_guard()
     user = "EVENT LOG:\n" + "\n".join(req.episodes[-100:])
-    raw = _generate(prompts.DISTILL_SYSTEM, user, max_tokens=500, temperature=0.2)
+    raw = _generate(prompts.distill_system(req.system_override), user,
+                    max_tokens=500, temperature=0.2)
     data = prompts.extract_json(raw) or {}
     proposals = []
     for p in data.get("proposals", []):
