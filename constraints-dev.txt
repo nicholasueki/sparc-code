@@ -1,0 +1,11 @@
+-c constraints.txt
+
+# Resolution input only; install locks/dev-macos-py312.txt.
+
+fastapi==0.139.0
+fastembed==0.8.0
+numpy==2.5.0
+Pillow==12.3.0
+pytest==9.1.1
+sqlite-vec==0.1.9
+uvicorn==0.51.0

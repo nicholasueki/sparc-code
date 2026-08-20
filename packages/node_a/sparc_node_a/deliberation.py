@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from sparc_common import config, narrative
-from sparc_common.types import Action, new_id
+from sparc_common.types import MOTION_KINDS, Action, new_id
 
 
 class Tier(str, Enum):
@@ -55,13 +55,20 @@ def serialize_scene(world) -> str:
     if world.present:
         people = []
         for eid, info in world.present.items():
-            who = info["name"] or "someone SPARC doesn't recognize"
+            state = info.get("identity_state", "unknown")
+            if state == "uncertain":
+                who = "someone whose identity SPARC is uncertain about"
+            else:
+                who = world.live_name(eid) or "someone SPARC doesn't recognize"
             attend = ", looking at SPARC" if info.get("attending", 0) > 0.5 else ""
             people.append(f"{who} is here (came in {narrative.ago(info['since'])}{attend})")
         bits.append(" ".join(people) + ".")
         # ground truth about face memory — prevents false "I remember your face"
         # claims and signals when enrollment is possible (design: code owns reality).
-        unknown_ids = [e for e, i in world.present.items() if not i.get("name")]
+        unknown_ids = [
+            e for e, i in world.present.items()
+            if not i.get("name") and i.get("identity_state", "unknown") == "unknown"
+        ]
         if len(unknown_ids) == 1:
             has_face = len(world.face_samples(unknown_ids[0])) >= 3
             bits.append(
@@ -101,18 +108,54 @@ def _render_event(type_: str, description: str) -> str:
 
 # -------------------------------------------------------------- validator
 
+GENERIC_GREETING = "Oh — hi there!"
+
+
+def grounded_greeting_text(world, delib: Deliberation) -> str | None:
+    """Return the only greeting text authorized for this exact live target."""
+    if delib.event_type != "person_enters" or len(delib.entity_ids) != 1:
+        return None
+    target = delib.entity_ids[0]
+    if target not in world.present:
+        return None
+    name = world.live_name(target)
+    return f"Hi {name}!" if name else GENERIC_GREETING
+
+
+def ground_greeting(world, delib: Deliberation, action: Action) -> Action:
+    """Replace unconstrained arrival prose with target-authorized greeting text."""
+    if (delib.event_type != "person_enters"
+            or action.kind not in ("say", "ask_user")):
+        return action
+    text = grounded_greeting_text(world, delib)
+    if text is None:
+        return action
+    why = "; ".join(filter(None, (action.why, "identity-grounded greeting")))
+    return action.model_copy(update={
+        "kind": "say", "args": {"text": text}, "why": why,
+    })
+
+
 def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
     """Deterministic re-check against LIVE state (LIM-M2-3). -> (ok, reason)."""
+    if action.kind in MOTION_KINDS:
+        # Fail closed: only the literal YAML boolean true enables motion. Even then,
+        # no action is executable until a real executor is wired into Node A.
+        if config.get("motion.enabled", False) is not True:
+            return False, "motion disabled"
+        return False, "motion executor unavailable"
     if action.kind in ("say", "ask_user"):
         text = (action.args or {}).get("text", "")
         if not text or len(text) > 400:
             return False, "say/ask text missing or too long"
         if delib.event_type == "person_enters":
-            # person must still be present
-            if delib.entity_ids and not any(e in world.present for e in delib.entity_ids):
-                return False, "person already left"
+            expected = grounded_greeting_text(world, delib)
+            if expected is None:
+                return False, "greeting target unavailable"
+            if action.kind != "say" or text != expected:
+                return False, "greeting is not grounded to its live target"
             cooldown = config.get("node_a.cooldowns.greet_same_person_s", 300)
-            key = f"greet:{delib.entity_ids[0] if delib.entity_ids else 'unknown'}"
+            key = f"greet:{delib.entity_ids[0]}"
             if time.time() - world.last_action_ts.get(key, 0) < cooldown:
                 return False, "greeting cooldown"
             # global greet cooldown: identity churn must never cause rapid re-greeting
@@ -128,7 +171,10 @@ def validate(world, delib: Deliberation, action: Action) -> tuple[bool, str]:
             return False, "enroll_face: implausible name"
         if name.lower() in (n.lower() for n in world.known_names()):
             return False, f"enroll_face: {name} already enrolled"
-        unknowns = [e for e, i in world.present.items() if not i.get("name")]
+        unknowns = [
+            e for e, i in world.present.items()
+            if not i.get("name") and i.get("identity_state", "unknown") == "unknown"
+        ]
         # v0.5: known people may be present; the NAME just needs an unambiguous owner
         if len(unknowns) == 0:
             return False, "enroll_face: nobody unrecognized is present"

@@ -18,7 +18,9 @@ import httpx
 
 from sparc_common import config
 from sparc_common.bus import Bus
+from sparc_common.health import HealthReporter
 from sparc_common.types import (
+    MOTION_KINDS,
     Action,
     DetectionFrame,
     SoundEvent,
@@ -28,7 +30,15 @@ from sparc_common.types import (
     Transcript,
 )
 
-from .deliberation import Deliberation, Stage, Tier, mark_executed, serialize_scene, validate
+from .deliberation import (
+    Deliberation,
+    Stage,
+    Tier,
+    ground_greeting,
+    mark_executed,
+    serialize_scene,
+    validate,
+)
 from .world_model import WorldModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -65,6 +75,27 @@ class Orchestrator:
         # v0.4: births wait briefly for face identity before greeting (ENRICHED stage)
         self._pending_births: dict[str, float] = {}  # entity_id -> greet deadline
 
+    def health(self) -> dict:
+        try:
+            self.world.db.execute("SELECT 1").fetchone()
+            db_ready = True
+        except Exception:
+            db_ready = False
+        details = {
+            "db_ready": db_ready,
+            "mqtt_ready": self.bus.connected,
+        }
+        # T6 owns bounded-session readiness and must add its real runtime evidence.
+        # Until then the v0.3 verifier rejects the absent defining detail; v0.4
+        # remains independently gated by the profile-neutral DB + MQTT checks.
+        ready = bool(db_ready and self.bus.connected)
+        missing = [name for name in ("db_ready", "mqtt_ready") if not details[name]]
+        return {
+            "ready": ready,
+            "details": details,
+            "failure_reason": None if ready else f"not ready: {', '.join(missing)}",
+        }
+
     # ------------------------------------------------------------ ingest
 
     def on_tier0(self, frame: DetectionFrame) -> None:
@@ -72,8 +103,7 @@ class Orchestrator:
             if det.cls != "person":
                 continue
             if frame.scene_delta == "new_track":
-                eid, name, identity, reappeared = self.world.person_appeared(det.track_id)
-                who = name or "someone new"
+                eid, _, _, reappeared = self.world.person_appeared(det.track_id)
                 if reappeared:
                     # object permanence: same person, brief tracking gap — no re-greet
                     self.world.trace("-", "reappearance", {"entity": eid})
@@ -102,12 +132,22 @@ class Orchestrator:
             eid = self.world.entity_by_track(det.track_id)
             if eid is None:
                 continue  # track vanished between embed and delivery
-            # churn-proof rolling buffer for seamless enrollment (enroll_face action)
-            self.world.buffer_face(eid, det.face_embedding)
-            new_eid, name, quality = self.world.update_identity(eid, det.face_embedding)
+            new_eid, name, quality = self.world.update_identity(
+                eid, det.face_embedding, det.conf)
+            # Anonymous samples remain available for enrollment.  Known-face
+            # contradictions are buffered separately by the world model so they
+            # cannot contaminate a durable enrollment's sample history.
+            if (not self.world.present.get(new_eid, {}).get("name")
+                    and not (new_eid != eid and quality == "unknown")):
+                self.world.buffer_face(new_eid, det.face_embedding)
+            if new_eid != eid and eid in self._pending_births:
+                self._pending_births[new_eid] = self._pending_births.pop(eid)
+            elif new_eid != eid and quality == "unknown":
+                # A corrected anonymous arrival gets one fresh generic-greeting
+                # opportunity; the validator's global cooldown prevents repeats.
+                wait_s = float(config.get("node_a.face.identity_wait_s", 2.5))
+                self._pending_births[new_eid] = time.time() + wait_s
             if name and quality == "known":
-                if eid in self._pending_births:  # keep the greet pending under the merged id
-                    self._pending_births[new_eid] = self._pending_births.pop(eid)
                 if not self.world.db.execute(
                     "SELECT 1 FROM trace WHERE kind='identified' AND payload LIKE ? "
                     "AND ts > ?", (f"%{new_eid}%", time.time() - 300)).fetchone():
@@ -123,7 +163,7 @@ class Orchestrator:
             if info is None:
                 self._pending_births.pop(eid, None)
                 continue
-            name = info.get("name")
+            name = self.world.live_name(eid)
             if not name and now < deadline:
                 continue
             self._pending_births.pop(eid, None)
@@ -210,6 +250,7 @@ class Orchestrator:
         self.bus.subscribe("sparc/audio/transcript", Transcript, self.on_transcript)
         self.bus.subscribe("sparc/audio/sound", SoundEvent, self.on_sound)
         self.bus.start()
+        HealthReporter(self.bus, "orchestrator", self.health).start()
         log.info("orchestrator live; world has %d facts",
                  len(self.world.facts_for_prompt(99)))
         period = 1.0 / float(config.get("node_a.scheduler_hz", 20))
@@ -238,7 +279,7 @@ class Orchestrator:
 
     def _maybe_frame(self, d: Deliberation) -> str | None:
         """One live JPEG (base64) for events where seeing helps. Fail-open:
-        no frame is never an error, just a text-only think. Never persisted."""
+        no frame is never an error, just a text-only think."""
         if not config.get("node_a.vision_in_loop", True):
             return None
         wants = d.event_type in ("person_enters", "sound_event") or (
@@ -313,13 +354,43 @@ class Orchestrator:
         d.stage = Stage.DECIDED
 
         # VALIDATE against live state, then execute (backup = deterministic wait)
+        self._execute_requested(d, action)
+
+    def _execute_requested(self, d: Deliberation, action: Action) -> None:
+        """Validate one requested action and truthfully trace its outcome."""
+        grounded = ground_greeting(self.world, d, action)
+        if grounded != action:
+            self.world.trace(d.id, "greeting_grounded", {
+                "target_entity": d.entity_ids[0] if len(d.entity_ids) == 1 else None,
+                "requested": action.args.get("text"),
+                "executable": grounded.args.get("text"),
+                "live_name": (
+                    self.world.live_name(d.entity_ids[0])
+                    if len(d.entity_ids) == 1 else None
+                ),
+            })
+            action = grounded
+            d.partial_result = action
+        self.world.trace(d.id, "requested", {
+            "action": action.kind, "args": action.args,
+            "fallback_level": action.fallback_level, "age_s": round(d.age(), 2)})
         ok, reason = validate(self.world, d, action)
         if not ok:
-            self.world.trace(d.id, "vetoed", {"reason": reason, "action": action.kind})
-            self.bus.publish_json("sparc/debug/thought", {
-                "kind": "note",
-                "text": f"vetoed {action.kind} ({reason}) — doing nothing instead"})
-            action = Action(kind="wait", why=f"vetoed: {reason}", fallback_level=3)
+            self.world.trace(d.id, "vetoed", {
+                "reason": reason, "action": action.kind, "args": action.args})
+            fallback = Action(kind="wait", why=f"vetoed: {reason}", fallback_level=3)
+            d.partial_result = fallback
+            self.execute(d, fallback, trace_kind="fallback_executed")
+            try:
+                self.bus.publish_json("sparc/debug/thought", {
+                    "kind": "note",
+                    "text": (
+                        f"vetoed {action.kind} ({reason}) — using safe wait fallback"
+                    ),
+                })
+            except Exception as e:
+                log.warning("debug telemetry unavailable after action veto: %s", e)
+            return
         self.execute(d, action)
 
     def _memory_briefing(self, d: Deliberation) -> str:
@@ -348,7 +419,17 @@ class Orchestrator:
 
     # ----------------------------------------------------------- execute
 
-    def execute(self, d: Deliberation, action: Action) -> None:
+    def execute(
+        self,
+        d: Deliberation,
+        action: Action,
+        *,
+        trace_kind: str = "executed",
+    ) -> None:
+        if action.kind in MOTION_KINDS:
+            # Motion must never fall through this non-motion executor as a silent
+            # no-op. The validator currently routes all motion to a safe fallback.
+            raise RuntimeError("motion executor unavailable")
         d.stage = Stage.EXECUTED
         if action.kind in ("say", "ask_user"):
             text = action.args.get("text", "")
@@ -366,7 +447,10 @@ class Orchestrator:
             self.world.conversation.append({"role": "sparc", "text": ack, "ts": time.time()})
         elif action.kind == "enroll_face":
             name = str(action.args.get("name", "")).strip()
-            unknowns = [e for e, i in self.world.present.items() if not i.get("name")]
+            unknowns = [
+                e for e, i in self.world.present.items()
+                if not i.get("name") and i.get("identity_state") == "unknown"
+            ]
             eid = self.world.enroll_present(unknowns[0], name) if unknowns else None
             if eid:
                 self.world.add_event("enrolled", f"SPARC learned {name}'s face",
@@ -392,7 +476,7 @@ class Orchestrator:
             self.world.add_event("reminder_set",
                                  f"reminder: {action.args.get('text','')}", d.entity_ids, 0.5)
         mark_executed(self.world, d, action)
-        self.world.trace(d.id, "executed", {
+        self.world.trace(d.id, trace_kind, {
             "action": action.kind, "args": action.args,
             "fallback_level": action.fallback_level, "age_s": round(d.age(), 2)})
 

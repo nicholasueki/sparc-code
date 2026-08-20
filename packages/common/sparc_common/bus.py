@@ -19,6 +19,7 @@ from .types import (
     SoundEvent,
     SpeakRequest,
     SpeechEvent,
+    ServiceHealth,
     Transcript,
 )
 
@@ -32,8 +33,17 @@ TOPICS: dict[str, type[BaseModel]] = {
     "sparc/audio/sound": SoundEvent,
     "sparc/audio/transcript": Transcript,
     "sparc/tts/say": SpeakRequest,
+    "sparc/health/orchestrator": ServiceHealth,
+    "sparc/health/tripwire": ServiceHealth,
+    "sparc/health/enrich": ServiceHealth,
+    "sparc/health/earsd": ServiceHealth,
 }
-RETAINED: set[str] = set()
+RETAINED: set[str] = {
+    "sparc/health/orchestrator",
+    "sparc/health/tripwire",
+    "sparc/health/enrich",
+    "sparc/health/earsd",
+}
 
 
 class Bus:
@@ -46,6 +56,7 @@ class Bus:
         self._handlers: dict[str, list[tuple[type[BaseModel], Callable]]] = {}
         self._client.on_message = self._on_message
         self._client.on_connect = self._on_connect
+        self._client.on_disconnect = self._on_disconnect
         self._connected = threading.Event()
 
     # -- lifecycle ---------------------------------------------------------
@@ -58,21 +69,37 @@ class Bus:
     def stop(self) -> None:
         self._client.loop_stop()
         self._client.disconnect()
+        self._connected.clear()
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
+        if reason_code != 0:
+            log.error("bus connection rejected by %s:%s: %s", self._host, self._port,
+                      reason_code)
+            return
         self._connected.set()
         for topic in self._handlers:
             client.subscribe(topic, qos=1)
         log.info("bus connected to %s:%s", self._host, self._port)
+
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+        self._connected.clear()
+        log.warning("bus disconnected from %s:%s: %s", self._host, self._port,
+                    reason_code)
+
+    @property
+    def connected(self) -> bool:
+        return self._connected.is_set()
 
     # -- pub/sub -----------------------------------------------------------
     def publish(self, topic: str, msg: BaseModel) -> None:
         expected = TOPICS.get(topic)
         if expected is not None and not isinstance(msg, expected):
             raise TypeError(f"{topic} expects {expected.__name__}, got {type(msg).__name__}")
-        self._client.publish(
+        result = self._client.publish(
             topic, msg.model_dump_json(), qos=1, retain=topic in RETAINED
         )
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise ConnectionError(f"MQTT publish failed for {topic}: rc={result.rc}")
 
     def publish_json(self, topic: str, payload: dict) -> None:
         """Untyped escape hatch for debug/telemetry topics only.

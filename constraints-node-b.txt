@@ -1,0 +1,7 @@
+-c constraints.txt
+
+# Resolution input only; install locks/node-b-debian13-arm64-py313.txt.
+
+fastapi==0.139.0
+numpy==2.5.0
+uvicorn==0.51.0

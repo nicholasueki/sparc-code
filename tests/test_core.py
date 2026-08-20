@@ -1,12 +1,15 @@
 """Fixture tests — no hardware, no network. Run: pytest tests/ from repo root."""
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 for pkg in ("common", "node_a", "node_c"):
     sys.path.insert(0, str(ROOT / "packages" / pkg))
 
-from sparc_common.types import ThinkRequest, OptionMeta  # noqa: E402
+from sparc_common.types import MOTION_KINDS, Action, ThinkRequest, OptionMeta  # noqa: E402
 from sparc_node_c import prompts  # noqa: E402
 from sparc_node_a.perception.imx500_tripwire import CentroidTracker  # noqa: E402
 from sparc_common import narrative  # noqa: E402
@@ -129,7 +132,8 @@ def test_person_reappearance_object_permanence(tmp_path):
     assert re1 is False
     w.person_left("trk_a")
     eid2, _, identity, re2 = w.person_appeared("trk_b")  # seconds later, new track id
-    assert re2 is True and eid2 == eid1 and identity == "reappeared"
+    assert re2 is True and eid2 == eid1 and identity == "unknown"
+    assert w.present[eid2]["identity_provenance"] == "timestamp"
 
 
 def test_camera_section_only_when_image_attached():
@@ -259,6 +263,145 @@ def test_face_buffer_survives_presence_churn(tmp_path):
     assert len(w.face_samples(eid)) == 4    # buffer survived
 
 
+@pytest.fixture
+def motion_config(tmp_path, monkeypatch):
+    from sparc_common import config
+
+    def set_config(motion_yaml: str) -> None:
+        cfg = tmp_path / "sparc.yaml"
+        cfg.write_text(motion_yaml)
+        monkeypatch.setenv("SPARC_CONFIG", str(cfg))
+        config.load.cache_clear()
+
+    yield set_config
+    config.load.cache_clear()
+
+
+@pytest.mark.parametrize("motion_kind", sorted(MOTION_KINDS))
+def test_disabled_motion_is_vetoed_and_only_fallback_executes(
+    tmp_path, motion_config, motion_kind
+):
+    from sparc_node_a.deliberation import Deliberation, Stage
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
+
+    motion_config("motion: {enabled: false}\n")
+    world = WorldModel(str(tmp_path / "world.db"))
+    orchestrator = object.__new__(Orchestrator)
+    orchestrator.world = world
+    orchestrator.bus = type(
+        "StubBus", (), {"publish_json": lambda self, *args, **kwargs: None}
+    )()
+    deliberation = Deliberation(event_type="test", trigger_desc="motion request")
+
+    orchestrator._execute_requested(deliberation, Action(kind=motion_kind))
+
+    rows = world.db.execute(
+        "SELECT kind, payload FROM trace WHERE deliberation_id=? ORDER BY rowid",
+        (deliberation.id,),
+    ).fetchall()
+    assert [kind for kind, _ in rows] == [
+        "requested", "vetoed", "fallback_executed"
+    ]
+    payloads = [json.loads(payload) for _, payload in rows]
+    assert payloads[0]["action"] == motion_kind
+    assert payloads[1] == {
+        "reason": "motion disabled", "action": motion_kind, "args": {}
+    }
+    assert payloads[2]["action"] == "wait"
+    assert payloads[2]["fallback_level"] == 3
+    assert deliberation.stage == Stage.EXECUTED
+    assert deliberation.partial_result.kind == "wait"
+
+
+def test_motion_wire_kind_is_stop_moving_not_stop():
+    assert "stop_moving" in MOTION_KINDS
+    assert "stop" not in MOTION_KINDS
+
+
+@pytest.mark.parametrize(
+    "motion_yaml",
+    ["{}\n", "motion: true\n", "motion: {enabled: 'true'}\n"],
+)
+def test_absent_or_malformed_motion_config_fails_closed(
+    tmp_path, motion_config, motion_yaml
+):
+    from sparc_node_a.deliberation import Deliberation, validate
+    from sparc_node_a.world_model import WorldModel
+
+    motion_config(motion_yaml)
+    world = WorldModel(str(tmp_path / "world.db"))
+    action = Action(kind=sorted(MOTION_KINDS)[0])
+    ok, reason = validate(
+        world, Deliberation(event_type="test", trigger_desc="motion request"), action
+    )
+    assert not ok
+    assert reason == "motion disabled"
+
+
+def test_enabled_motion_without_executor_is_vetoed_and_not_traced_executed(
+    tmp_path, motion_config
+):
+    from sparc_node_a.deliberation import Deliberation
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
+
+    motion_config("motion: {enabled: true}\n")
+    world = WorldModel(str(tmp_path / "world.db"))
+    orchestrator = object.__new__(Orchestrator)
+    orchestrator.world = world
+    orchestrator.bus = type(
+        "StubBus", (), {"publish_json": lambda self, *args, **kwargs: None}
+    )()
+    action = Action(kind=sorted(MOTION_KINDS)[0])
+    deliberation = Deliberation(event_type="test", trigger_desc="motion request")
+
+    orchestrator._execute_requested(deliberation, action)
+
+    rows = world.db.execute(
+        "SELECT kind, payload FROM trace WHERE deliberation_id=? ORDER BY rowid",
+        (deliberation.id,),
+    ).fetchall()
+    assert [kind for kind, _ in rows] == [
+        "requested", "vetoed", "fallback_executed"
+    ]
+    assert json.loads(rows[1][1])["reason"] == "motion executor unavailable"
+    assert all(kind != "executed" for kind, _ in rows)
+
+
+def test_motion_fallback_survives_debug_telemetry_failure(
+    tmp_path, motion_config
+):
+    from sparc_node_a.deliberation import Deliberation, Stage
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
+
+    class RaisingBus:
+        def publish_json(self, *args, **kwargs):
+            raise RuntimeError("debug broker unavailable")
+
+    motion_config("motion: {enabled: false}\n")
+    world = WorldModel(str(tmp_path / "world.db"))
+    orchestrator = object.__new__(Orchestrator)
+    orchestrator.world = world
+    orchestrator.bus = RaisingBus()
+    deliberation = Deliberation(event_type="test", trigger_desc="motion request")
+
+    orchestrator._execute_requested(
+        deliberation, Action(kind=sorted(MOTION_KINDS)[0])
+    )
+
+    rows = world.db.execute(
+        "SELECT kind FROM trace WHERE deliberation_id=? ORDER BY rowid",
+        (deliberation.id,),
+    ).fetchall()
+    assert [kind for kind, in rows] == [
+        "requested", "vetoed", "fallback_executed"
+    ]
+    assert deliberation.stage == Stage.EXECUTED
+    assert deliberation.partial_result.kind == "wait"
+
+
 def test_face_track_association():
     from sparc_node_a.perception.face_enrich import match_face_to_track
     boxes = {"near": (0.4, 0.2, 0.7, 0.95), "far": (0.35, 0.3, 0.8, 1.0),
@@ -289,3 +432,459 @@ def test_enroll_allowed_with_known_person_present(tmp_path):
     w.person_appeared("trk_stranger2")
     ok, why = validate(w, d, Action(kind="enroll_face", args={"name": "Bob"}))
     assert not ok and "unclear" in why
+
+
+def test_fresh_face_evidence_has_conservative_states(tmp_path):
+    """Transition rows: no face, positive, uncertain, and below-threshold."""
+    import math
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import serialize_scene
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+
+    anonymous, name, state, _ = w.person_appeared("no-face")
+    assert name is None and state == "unknown"
+    assert w.present[anonymous]["identity_provenance"] == "none"
+    w.person_left("no-face")
+
+    known, name, state, reappeared = w.person_appeared(
+        "positive", [1.0, 0.0, 0.0])
+    assert (known, name, state, reappeared) == (
+        nicholas, "Nicholas", "known", False)
+    assert w.live_name(known) == "Nicholas"
+    w.person_left("positive")
+
+    uncertain_vec = [0.5, math.sqrt(0.75), 0.0]
+    uncertain, name, state, _ = w.person_appeared("uncertain", uncertain_vec)
+    assert uncertain != nicholas and name is None and state == "uncertain"
+    scene = serialize_scene(w)
+    assert "identity SPARC is uncertain about" in scene
+    assert "Nicholas" not in scene
+    w.person_left("uncertain")
+
+    negative, name, state, _ = w.person_appeared("negative", [0.0, 0.0, 1.0])
+    assert negative not in (nicholas, uncertain)
+    assert name is None and state == "unknown"
+
+
+def test_timestamp_reappearance_never_reuses_enrollment(tmp_path):
+    """Transition rows: timestamp continuity is anonymous-only."""
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import serialize_scene
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    live_known, *_ = w.person_appeared("known-track", [1.0, 0.0, 0.0])
+    assert live_known == known
+    w.person_left("known-track")
+
+    stranger, name, state, reappeared = w.person_appeared("stranger-track")
+    assert stranger != known
+    assert name is None and state == "unknown" and reappeared is False
+    assert known not in w.present
+    assert "Nicholas" not in serialize_scene(w)
+
+    w.person_left("stranger-track")
+    same_stranger, _, state, reappeared = w.person_appeared("stranger-flap")
+    assert same_stranger == stranger and state == "unknown" and reappeared is True
+
+
+def test_known_confirmation_clears_contradiction_and_no_face_retains_binding(tmp_path):
+    """Transition rows: contradiction clears on confirmation; no-face is inert."""
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+
+    eid, name, state = w.update_identity(known, [0.0, 1.0, 0.0], 0.9)
+    assert eid == known and name is None and state == "uncertain"
+    assert len(w.contradiction_buffer[known]) == 1
+
+    eid, name, state = w.update_identity(known, [1.0, 0.0, 0.0], 0.9)
+    assert (eid, name, state) == (known, "Nicholas", "known")
+    assert known not in w.contradiction_buffer
+    # No update is made when a rich frame contains no face; the confirmed live
+    # binding therefore remains authoritative for this continuous track.
+    assert w.live_name(known) == "Nicholas"
+
+
+def test_two_consistent_other_known_samples_rebind(tmp_path):
+    """Transition row: a different enrollment needs two consistent positives."""
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    maya = w.enroll_face("Maya", [0.0, 1.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+
+    eid, name, state = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+    assert eid == nicholas and name is None and state == "uncertain"
+    assert w.live_name(nicholas) is None
+
+    eid, name, state = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+    assert (eid, name, state) == (maya, "Maya", "known")
+    assert nicholas not in w.present
+    assert w.present[maya]["track_id"] == "trk"
+    assert w.live_name(maya) == "Maya"
+
+
+def test_uncertain_live_known_suppresses_scene_and_named_greeting(tmp_path):
+    """Uncertain evidence retains enrollment but forbids named presentation."""
+    import math
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.deliberation import Deliberation, serialize_scene, validate
+    from sparc_common.types import Action
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+    uncertain_vec = [0.5, math.sqrt(0.75), 0.0]
+    eid, name, state = w.update_identity(known, uncertain_vec, 0.9)
+    assert (eid, name, state) == (known, None, "uncertain")
+    assert "Nicholas" in w.known_names()  # durable enrollment remains
+
+    scene = serialize_scene(w)
+    assert "identity SPARC is uncertain about" in scene
+    assert "Nicholas" not in scene
+    d = Deliberation(
+        event_type="person_enters", trigger_desc="arrival", entity_ids=[known])
+    ok, why = validate(
+        w, d, Action(kind="say", args={"text": "Hi Nicholas!"}))
+    assert not ok and "live target" in why
+    ok, why = validate(w, d, Action(kind="say", args={"text": "Oh — hi there!"}))
+    assert ok, why
+
+
+def test_three_stable_high_quality_negatives_split_without_corruption(tmp_path):
+    """Three strong negatives move only the live presentation and its evidence."""
+    import json
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+    w.buffer_face(known, [1.0, 0.0, 0.0])
+    old_event = w.add_event("observed", "Nicholas waved", [known], 0.6)
+    w.last_action_ts[f"greet:{known}"] = 123.0
+
+    negative = [0.0, 1.0, 0.0]
+    for _ in range(2):
+        eid, name, state = w.update_identity(known, negative, 0.9)
+        assert eid == known and name is None and state == "uncertain"
+    new_eid, name, state = w.update_identity(known, negative, 0.9)
+
+    assert new_eid != known and name is None and state == "unknown"
+    assert known not in w.present and w.present[new_eid]["track_id"] == "trk"
+    assert w.db.execute(
+        "SELECT name, present FROM entities WHERE id=?", (known,)).fetchone() == (
+            "Nicholas", 0)
+    assert w.db.execute(
+        "SELECT name FROM known_faces WHERE entity_id=?", (known,)).fetchone() == (
+            "Nicholas",)
+    assert len(w.face_samples(new_eid)) == 3
+    assert w.face_samples(known) == [[1.0, 0.0, 0.0]]
+    assert w.last_action_ts[f"greet:{known}"] == 123.0
+
+    old_ids = json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (old_event,)).fetchone()[0])
+    assert old_ids == [known]
+    new_event = w.add_event("observed", "the visitor waved", [new_eid], 0.6)
+    new_ids = json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (new_event,)).fetchone()[0])
+    assert new_ids == [new_eid]
+
+
+def test_negative_split_requires_detection_quality_and_embedding_agreement(tmp_path):
+    """Low-confidence or mutually-inconsistent negatives cannot force a split."""
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0, 0.0])
+
+    for _ in range(4):
+        eid, _, _ = w.update_identity(known, [0.0, 1.0, 0.0, 0.0], 0.2)
+        assert eid == known
+    inconsistent = (
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    )
+    for sample in inconsistent:
+        eid, _, _ = w.update_identity(known, sample, 0.9)
+        assert eid == known
+    assert len(w.contradiction_buffer[known]) == 1
+
+
+def test_identity_transition_trace_records_evidence_and_entities(tmp_path):
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+    w.update_identity(known, [0.0, 1.0, 0.0], 0.9)
+    rows = w.db.execute(
+        "SELECT payload FROM trace WHERE kind='identity_transition' ORDER BY id"
+    ).fetchall()
+    assert rows
+    payloads = [__import__("json").loads(row[0]) for row in rows]
+    assert any(p["transition"] == "confirm" and p["to_entity"] == known
+               and p["evidence_class"] == "known_match" for p in payloads)
+    assert any(p["transition"] == "uncertain" and p["from_entity"] == known
+               and p["evidence_class"] == "strong_negative" for p in payloads)
+
+
+def test_orchestrator_split_schedules_one_unnamed_greeting(tmp_path):
+    """A corrected anonymous arrival is handed to the generic greeting path."""
+    import time
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_common.types import Detection, DetectionFrame
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("trk", [1.0, 0.0, 0.0])
+
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = w
+    o._pending_births = {}
+    o._pending_person = {}
+    submitted = []
+    o.submit = submitted.append
+    frame = DetectionFrame(
+        source="hailo8", scene_delta="periodic",
+        detections=[Detection(
+            track_id="trk", cls="face", conf=0.9,
+            bbox=(0.1, 0.1, 0.2, 0.2),
+            face_embedding=[0.0, 1.0, 0.0])])
+    for _ in range(3):
+        o.on_rich(frame)
+
+    anonymous = w.entity_by_track("trk")
+    assert anonymous != known
+    assert len(w.face_samples(anonymous)) == 3  # split samples, no duplicate append
+    assert anonymous in o._pending_births
+    assert o._pending_births[anonymous] > time.time()
+
+    o._pending_births[anonymous] = 0.0
+    o._drain_births()
+    assert len(submitted) == 1
+    assert "someone new" in submitted[0].trigger_desc
+    assert "Nicholas" not in submitted[0].trigger_desc
+
+
+def test_anonymous_tracker_flap_does_not_schedule_second_greeting(tmp_path):
+    from sparc_node_a.world_model import WorldModel
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_common.types import Detection, DetectionFrame
+
+    class FakeBus:
+        def publish_json(self, *_args, **_kwargs):
+            pass
+
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = WorldModel(str(tmp_path / "w.db"))
+    o.bus = FakeBus()
+    o._pending_births = {}
+    o._pending_person = {}
+    box = (0.1, 0.1, 0.2, 0.2)
+    o.on_tier0(DetectionFrame(
+        source="imx500", scene_delta="new_track",
+        detections=[Detection(
+            track_id="first", cls="person", conf=0.9, bbox=box)]))
+    anonymous = o.world.entity_by_track("first")
+    assert anonymous in o._pending_births
+
+    o.world.last_action_ts[f"greet:{anonymous}"] = 123.0
+    o.on_tier0(DetectionFrame(
+        source="imx500", scene_delta="lost_track",
+        detections=[Detection(
+            track_id="first", cls="person", conf=0.0, bbox=box)]))
+    assert o._pending_births == {}
+    o.on_tier0(DetectionFrame(
+        source="imx500", scene_delta="new_track",
+        detections=[Detection(
+            track_id="flap", cls="person", conf=0.9, bbox=box)]))
+
+    assert o.world.entity_by_track("flap") == anonymous
+    assert o._pending_births == {}
+    assert o.world.last_action_ts[f"greet:{anonymous}"] == 123.0
+
+
+@pytest.mark.parametrize("requested", ["Hi Nicholas!", "Hi Beatrice!"])
+def test_anonymous_arrival_replaces_ungrounded_name_with_generic_greeting(
+        tmp_path, requested):
+    """Absent enrollment and arbitrary prose are never executable identities."""
+    from sparc_node_a.deliberation import Deliberation, validate
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
+
+    class RecordingBus:
+        def __init__(self):
+            self.spoken = []
+
+        def publish(self, _topic, payload):
+            self.spoken.append(payload.text)
+
+        def publish_json(self, *_args, **_kwargs):
+            pass
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("known", [1.0, 0.0, 0.0])
+    w.person_left("known")
+    stranger, *_ = w.person_appeared("stranger")
+    d = Deliberation(
+        event_type="person_enters", trigger_desc="arrival", entity_ids=[stranger])
+    raw = Action(kind="say", args={"text": requested})
+
+    ok, why = validate(w, d, raw)
+    assert not ok and "live target" in why
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = w
+    o.bus = RecordingBus()
+    o._execute_requested(d, raw)
+
+    assert o.bus.spoken == ["Oh — hi there!"]
+    assert all(name not in o.bus.spoken[0] for name in ("Nicholas", "Beatrice"))
+    assert d.partial_result.args["text"] == "Oh — hi there!"
+    trace = w.db.execute(
+        "SELECT payload FROM trace WHERE deliberation_id=? AND kind='greeting_grounded'",
+        (d.id,),
+    ).fetchone()
+    assert json.loads(trace[0])["live_name"] is None
+    assert known not in w.present
+
+
+def test_confirmed_target_gets_only_its_grounded_named_greeting(tmp_path):
+    from sparc_node_a.deliberation import Deliberation, validate
+    from sparc_node_a.orchestrator import Orchestrator
+    from sparc_node_a.world_model import WorldModel
+
+    class RecordingBus:
+        def __init__(self):
+            self.spoken = []
+
+        def publish(self, _topic, payload):
+            self.spoken.append(payload.text)
+
+        def publish_json(self, *_args, **_kwargs):
+            pass
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("known", [1.0, 0.0, 0.0])
+    d = Deliberation(
+        event_type="person_enters", trigger_desc="arrival", entity_ids=[known])
+    correct = Action(kind="say", args={"text": "Hi Nicholas!"})
+    assert validate(w, d, correct) == (True, "ok")
+    assert validate(
+        w, d, Action(kind="say", args={"text": "Hi Beatrice!"})
+    )[0] is False
+
+    o = Orchestrator.__new__(Orchestrator)
+    o.world = w
+    o.bus = RecordingBus()
+    o._execute_requested(
+        d, Action(kind="say", args={"text": "Welcome, Beatrice!"}))
+    assert o.bus.spoken == ["Hi Nicholas!"]
+
+
+def test_anonymous_bind_conflict_preserves_incumbent_and_source(tmp_path):
+    from sparc_node_a.deliberation import serialize_scene
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("nick-track", [1.0, 0.0, 0.0])
+    source, *_ = w.person_appeared("stranger-track")
+    w.buffer_face(known, [1.0, 0.0, 0.0])
+    w.buffer_face(source, [0.0, 0.0, 1.0])
+    old_event = w.add_event("observed", "the stranger waved", [source], 0.6)
+
+    eid, name, state = w.update_identity(source, [1.0, 0.0, 0.0], 0.9)
+
+    assert (eid, name, state) == (source, None, "uncertain")
+    assert w.entity_by_track("nick-track") == known
+    assert w.entity_by_track("stranger-track") == source
+    assert w.present[known]["track_id"] == "nick-track"
+    assert w.live_name(known) == "Nicholas" and w.live_name(source) is None
+    assert w.face_samples(known) == [[1.0, 0.0, 0.0]]
+    assert w.face_samples(source) == [[0.0, 0.0, 1.0]]
+    assert "Nicholas" in serialize_scene(w)
+    assert "identity SPARC is uncertain about" in serialize_scene(w)
+    assert json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (old_event,)).fetchone()[0]
+    ) == [source]
+    assert w.db.execute(
+        "SELECT track_id, present FROM entities WHERE id=?", (known,)
+    ).fetchone() == ("nick-track", 1)
+    payload = json.loads(w.db.execute(
+        "SELECT payload FROM trace WHERE kind='identity_transition' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0])
+    assert payload["transition"] == "ownership_conflict"
+    assert payload["candidate_entity"] == known
+
+    assert w.person_left("stranger-track") == source
+    assert w.entity_by_track("stranger-track") is None
+    assert w.entity_by_track("nick-track") == known
+
+
+def test_known_rebind_conflict_preserves_both_tracks_and_later_leaves(tmp_path):
+    from sparc_node_a.deliberation import serialize_scene
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    nicholas = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    maya = w.enroll_face("Maya", [0.0, 1.0, 0.0])
+    w.person_appeared("nick-track", [1.0, 0.0, 0.0])
+    w.person_appeared("maya-track", [0.0, 1.0, 0.0])
+    w.buffer_face(nicholas, [1.0, 0.0, 0.0])
+    w.buffer_face(maya, [0.0, 1.0, 0.0])
+    event = w.add_event("observed", "both people waved", [nicholas, maya], 0.6)
+
+    first = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+    second = w.update_identity(nicholas, [0.0, 1.0, 0.0], 0.9)
+
+    assert first == (nicholas, None, "uncertain")
+    assert second == (nicholas, None, "uncertain")
+    assert w.entity_by_track("nick-track") == nicholas
+    assert w.entity_by_track("maya-track") == maya
+    assert w.present[maya]["track_id"] == "maya-track"
+    assert w.live_name(nicholas) is None and w.live_name(maya) == "Maya"
+    assert w.face_samples(nicholas) == [[1.0, 0.0, 0.0]]
+    assert w.face_samples(maya) == [[0.0, 1.0, 0.0]]
+    scene = serialize_scene(w)
+    assert "identity SPARC is uncertain about" in scene and "Maya" in scene
+    assert json.loads(w.db.execute(
+        "SELECT entity_ids FROM events WHERE id=?", (event,)).fetchone()[0]
+    ) == [nicholas, maya]
+    payload = json.loads(w.db.execute(
+        "SELECT payload FROM trace WHERE kind='identity_transition' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0])
+    assert payload["transition"] == "ownership_conflict"
+    assert payload["evidence_class"] == "different_known_live_conflict"
+
+    assert w.person_left("maya-track") == maya
+    assert w.entity_by_track("maya-track") is None
+    assert w.entity_by_track("nick-track") == nicholas
+    assert w.person_left("nick-track") == nicholas
+    assert not w.present
+
+
+def test_direct_positive_arrival_cannot_claim_already_live_enrollment(tmp_path):
+    from sparc_node_a.world_model import WorldModel
+
+    w = WorldModel(str(tmp_path / "w.db"))
+    known = w.enroll_face("Nicholas", [1.0, 0.0, 0.0])
+    w.person_appeared("incumbent", [1.0, 0.0, 0.0])
+
+    source, name, state, _ = w.person_appeared(
+        "conflicting", [1.0, 0.0, 0.0])
+    assert source != known and name is None and state == "uncertain"
+    assert w.entity_by_track("incumbent") == known
+    assert w.entity_by_track("conflicting") == source

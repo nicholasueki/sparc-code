@@ -21,6 +21,7 @@ import numpy as np
 
 from sparc_common import config
 from sparc_common.bus import Bus
+from sparc_common.health import HealthReporter
 from sparc_common.types import Detection, DetectionFrame
 
 log = logging.getLogger("sparc.face")
@@ -178,6 +179,25 @@ def main() -> None:
     bus = Bus(client_id="face-enrich")
     mirror = BoxMirror(bus)
     bus.start()
+    def health_probe() -> dict:
+        details = {
+            "mqtt_ready": bus.connected,
+            "scrfd_loaded": scrfd is not None,
+            "arcface_loaded": arcface is not None,
+            "scrfd_model": SCRFD_HEF,
+            "arcface_model": ARCFACE_HEF,
+        }
+        ready = bool(details["mqtt_ready"] and details["scrfd_loaded"] and
+                     details["arcface_loaded"])
+        missing = [name for name in ("mqtt_ready", "scrfd_loaded", "arcface_loaded")
+                   if not details[name]]
+        return {
+            "ready": ready,
+            "details": details,
+            "failure_reason": None if ready else f"not ready: {', '.join(missing)}",
+        }
+
+    HealthReporter(bus, "enrich", health_probe).start()
     http = httpx.Client(timeout=3)
 
     while True:

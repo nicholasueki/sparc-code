@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from sparc_common import config
+from sparc_common.health import runtime_version
 from sparc_common.types import (
     Action,
     MemoryProposal,
@@ -193,11 +194,15 @@ def distill(req: DistillRequest) -> dict:
 
 @app.get("/health")
 def health() -> dict:
+    ready = backend is not None
     return {
-        "ok": backend is not None,
+        "ok": ready,
+        "ready": ready,
+        "version": runtime_version(),
         "backend": backend.info() if backend else None,
         "inflight": _inflight,
         "facts": memory.count() if memory else 0,
+        "failure_reason": None if ready else "cognitive backend is not loaded",
     }
 
 

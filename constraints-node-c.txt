@@ -1,0 +1,16 @@
+-c constraints.txt
+
+# Resolution input only; install locks/node-c-macos14-arm64-py312.txt.
+
+fastapi==0.139.0
+fastembed==0.8.0
+mlx-vlm==0.6.3; platform_system == "Darwin" and python_version == "3.12"
+mlx-whisper==0.4.3; platform_system == "Darwin" and python_version == "3.12"
+# Preserve the T4-reviewed model stack across pip/uv resolver tie differences.
+mlx-audio==0.4.5; platform_system == "Darwin" and python_version == "3.12"
+numpy==2.3.5
+sounddevice==0.5.5; platform_system == "Darwin"
+sqlite-vec==0.1.9
+transformers==5.12.1; platform_system == "Darwin" and python_version == "3.12"
+uvicorn==0.51.0
+webrtcvad-wheels==2.0.14

@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Deploy sparc to node(s): scripts/deploy.sh {a|b|c|all}
-# Rsyncs the repo, creates the node venv (system-site-packages so hailo/picamera2
-# system libs stay importable), installs per-node deps. Portable to bash 3.2.
+# Rsyncs the repo, creates the node venv (system-site-packages so Hailo/Picamera2
+# system libs stay importable), and installs a committed dependency group through
+# the reviewed constraints file. Portable to bash 3.2.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 node_params() {
   case "$1" in
     a) HOST="robot-vision@robot-vision.local"; DEST="/home/robot-vision/sparc"
-       REQS="pydantic paho-mqtt pyyaml httpx numpy fastapi uvicorn" ;;
+       EXTRA="node-a" ;;
     b) HOST="robot-genai@robot-genai.local"; DEST="/home/robot-genai/sparc"
-       REQS="pydantic paho-mqtt pyyaml httpx fastapi uvicorn" ;;
+       EXTRA="node-b" ;;
     c) HOST="tokenator@10.1.215.33"; DEST="/Users/tokenator/sparc"
-       REQS="pydantic paho-mqtt pyyaml httpx fastapi uvicorn fastembed sqlite-vec" ;;
+       EXTRA="node-c" ;;
     *) echo "unknown node $1"; exit 1 ;;
   esac
 }
@@ -21,13 +22,15 @@ deploy_node() {
   node_params "$1"
   echo "== deploying node_$1 -> $HOST:$DEST"
   rsync -az --delete \
-    --exclude '.git' --exclude '__pycache__' --exclude '*.pyc' --exclude '.venv' \
+    --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+    --exclude '.pytest_cache' --exclude '*.egg-info' --exclude 'models/' \
+    --exclude '*.hef' --exclude '*.rpk' --exclude '*.gguf' --exclude '*.safetensors' \
     "$REPO/" "$HOST:$DEST/"
   if [ "$1" = "c" ]; then
-    ssh "$HOST" "~/.local/bin/uv pip install --python ~/mlx312/bin/python -q $REQS && echo deps-ok"
+    ssh "$HOST" "cd '$DEST' && PYTHON=\"\$HOME/mlx312/bin/python\" scripts/bootstrap_python.sh '$EXTRA'"
   else
     ssh "$HOST" "python3 -m venv --system-site-packages ~/sparc_venv 2>/dev/null || true; \
-                 ~/sparc_venv/bin/pip install -q $REQS && echo deps-ok"
+                 cd '$DEST' && PYTHON=\"\$HOME/sparc_venv/bin/python\" scripts/bootstrap_python.sh '$EXTRA'"
   fi
   echo "== node_$1 deployed"
 }
