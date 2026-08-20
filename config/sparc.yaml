@@ -38,6 +38,69 @@ personality:
   persona_line: "curious, warm, playful, brief, honest"
   weights: {social: 0.4, novelty: 0.3, recency: 0.2, investment: 0.1}
 
+# Memory prompt genes — lifted out of prompts.py so the evolution harness can run
+# a genome without editing source (docs/MEMORY_PROMPT_EVOLUTION.md §1). The values
+# below are the eval-validated production defaults; changing them changes behavior.
+# `{memory}` in briefing_header is substituted with the retrieval briefing.
+memory_prompts:
+  # G1 — closed-world framing. Added 2026-07-03 after the confabulation failure
+  # (model invented a fact AND its provenance). Do not weaken without re-running F3.
+  briefing_header: |-
+    MEMORY (the COMPLETE list of what SPARC knows from the past — if an answer is not here or in CONVERSATION, SPARC does NOT know it and says so): {memory}
+  # G2 — zero-knowledge honesty
+  empty_header: |-
+    MEMORY: (empty — SPARC has no stored knowledge; he must not claim to remember anything)
+  # G3 — what gets captured at all; upstream of every recall
+  distill_system: |-
+    You extract durable facts about people and the home from an event log. Only facts likely true next week. Reply ONLY with JSON: {"proposals":[{"statement":"...","kind":"fact|preference|habit","confidence":0.0}]}
+
+# Memory-prompt evolution harness (dev tool, never loaded by the rover at runtime).
+# Verify the whole rig — endpoints, model slugs, latency — before running:
+#   scripts/evolve_memory.py --preflight
+evolution:
+  # Node C == tokenator's MacBook. IP, not .local — measured 2026-08-17: the mDNS
+  # name adds 38-75 s of fixed overhead per /think call (79.8 s wall vs 4.5 s
+  # server-side generate), while the IP gives 5.9 s for the same work. Same bug the
+  # bus section documents, and why scripts/eval_memory.py hardcodes an IP. At .local
+  # latency one generation takes ~21 h instead of ~1.3 h.
+  # NOTE: these are `aat1` addresses (10.0.6.x, 2026-08-17). The Pis may still be on
+  # anywAIR (10.1.215.x) — see the bus section.
+  cortex_url: "http://10.0.6.158:8800"
+  embed_model: sentence-transformers/all-MiniLM-L6-v2
+  reps: 3               # independent repetitions per probe; drives the reliability term
+  population: 10
+  survivors: 4
+  holdout_every: 3      # generations between generalization-gap checks
+  # Researcher + grader tier. Any OpenAI-compatible /chat/completions endpoint:
+  # the DGX (LM Studio / vLLM / llama.cpp / Ollama), or a hosted gateway.
+  # api_key_env is ignored for private-network hosts, which need no auth.
+  #
+  # LM Studio headless, three things that will bite otherwise:
+  #  1. It binds to localhost by default — enable network serving, or Node C
+  #     cannot reach it no matter how the routing is set up.
+  #  2. Context length is set per model LOAD and defaults far below the ~20k
+  #     tokens a postmortem carries. Load with 32k+; `--preflight` runs a needle
+  #     test and fails loudly if the window is truncating.
+  #  3. Turn off idle auto-unload/TTL. A 26 h run has gaps, and a mid-run evict
+  #     turns the next call into a model reload.
+  researcher:
+    # SET ME. Must be reachable FROM NODE C — that is where the harness runs, so
+    # Node C (not the laptop) is the machine that needs the route to the DGX.
+    # DGX on another network -> mesh both with Tailscale: http://100.x.y.z:1234/v1
+    base_url: "http://10.0.6.110:1234/v1"    # DGX, verified reachable FROM Node C
+    api_key_env: ""                          # e.g. OPENROUTER_API_KEY for a gateway
+    # Three roles, three client objects — they may point at the same model. The
+    # split exists so the one call per generation that decides whether the loop
+    # actually learns (synthesis) can later be moved to a stronger model on its own.
+    postmortem_model: "qwen3.8-27b"   # ~20 independent analyses per generation
+    synthesis_model: "qwen3.8-27b"    # 1 per generation; highest leverage
+    judge_model: "qwen3.8-27b"        # only the handful of ambiguous-prose probes
+    # A slow local model makes this tier latency-bound, not cost-bound. Postmortems
+    # and judge calls are independent, so run them concurrently; lower this if the
+    # DGX queues rather than batches.
+    max_concurrency: 4
+    timeout_s: 600
+
 node_a:
   db_path: /home/robot-vision/sparc_data/world.db
   scheduler_hz: 20
